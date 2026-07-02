@@ -1,0 +1,23 @@
+# --- secrets ---
+.env
+*.key
+*.pem
+
+# --- python venv & caches ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- downloaded ML models / caches (auto-regenerated) ---
+hf_cache/
+*.pt
+*.onnx
+
+# --- generated media / previews (not source) ---
+bella_live_preview.mp4
+
+# --- macOS cruft ---
+.DS_Store
+**/.DS_Store

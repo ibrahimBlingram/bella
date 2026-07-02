@@ -1,0 +1,46 @@
+llm:
+  provider: gemini
+  model: gemini-2.5-flash        # start cheap+fast; bump to a newer flash for more "smarts"
+  grounding: false               # KEEP OFF by default. Only flips per-question for real current-events.
+  max_output_tokens: 120         # short, spoken answers
+  temperature: 0.9               # variety -> never-repeating narration
+
+tts:
+  provider: kokoro               # <-- LOCAL voice. kokoro | cartesia | elevenlabs | gemini
+  voice_id: "af_heart"           # kokoro voice. others: af_bella, af_nicole, bf_emma ...
+  kokoro_lang: "a"               # 'a' US English, 'b' UK English
+  sample_rate: 24000             # MUST be 24000 for kokoro (do not change)
+  output_device: "BlackHole 2ch"            # null = default speakers. Phase 2: "BlackHole 2ch" for OBS
+  model_id: "sonic-3"            # unused by kokoro; only for cartesia/elevenlabs
+  arabic:                        # Arabic-only fallback via ElevenLabs (Sara)
+    enabled: true                # set false to go English-only
+    voice_id: "21m00Tcm4TlvDq8ikWAM"   # ElevenLabs voice id for Sara
+    model_id: "eleven_flash_v2_5"            # multilingual, supports Arabic, ~0.5 credit/char
+
+stream:
+  username_env: TIKTOK_USERNAME  # read handle from .env
+  language: en                   # en | ar | de | es | pt | fr
+  theme: skincare                # loads knowledge/theme_<theme>.md  -> swap monthly
+  idle_seconds: 12               # no chat for this long -> narrate a topic
+  demo_after_idle: 90            # idle this long -> swap background to full-screen app demo
+  response_jitter: [1.0, 3.5]    # human-like delay before answering (seconds)
+  qa_cooldown: 8                 # min seconds between answered questions
+
+obs:
+  host: localhost
+  port: 4455
+  password: "Dubai@2026"
+  scene: "Live"
+  avatar_idle_source: "AvatarIdle"
+  avatar_talk_source: "AvatarTalk"
+  background_source: "Background"
+  avatar_idle_loops:
+    - "/Users/ibrahim/Desktop/THC/bella/clips/avatar_idle_loops/idle.mp4"
+  avatar_talk_loops:
+    - "/Users/ibrahim/Desktop/THC/bella/clips/avatar_talk_loops/talking1.mp4"
+    - "/Users/ibrahim/Desktop/THC/bella/clips/avatar_talk_loops/talking2.mp4"
+    - "/Users/ibrahim/Desktop/THC/bella/clips/avatar_talk_loops/talking3.mp4"
+  demo_backgrounds:
+    - "/Users/ibrahim/Desktop/THC/bella/clips/Background/B1.png"
+    - "/Users/ibrahim/Desktop/THC/bella/clips/Background/B2.png"
+    - "/Users/ibrahim/Desktop/THC/bella/clips/Background/B3.png"
