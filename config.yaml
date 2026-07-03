@@ -20,11 +20,29 @@ tts:
 stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
   language: en                   # en | ar | de | es | pt | fr
-  theme: skincare                # loads knowledge/theme_<theme>.md  -> swap monthly
+  theme: dubai_realestate        # loads knowledge/theme_<theme>.md  -> swap monthly
   idle_seconds: 12               # no chat for this long -> narrate a topic
   demo_after_idle: 90            # idle this long -> swap background to full-screen app demo
   response_jitter: [1.0, 3.5]    # human-like delay before answering (seconds)
   qa_cooldown: 8                 # min seconds between answered questions
+
+data:
+  # Full Sobha dataset — the compact index lives in knowledge/sobha_projects.md
+  # (always-on); this file is retrieved per-project for complete detail
+  # (every floor plan, FAQ, currency) only when Bella is on that project.
+  sobha_dataset: /Users/ibrahim/Desktop/THC/bella/data/sobha_full_dataset.json
+  # The 33 CURATED, ORDERED projects that have on-screen visuals. Bella walks
+  # these 1->33 during idle time, promoting each while its images play in the
+  # background, with a Dubai real-estate hook between projects so it never feels
+  # like a dry catalog. Order + media come from media.projects_root folders.
+  sobha_featured: /Users/ibrahim/Desktop/THC/bella/data/sobha_featured.json
+
+media:
+  # One subfolder per project, named NN_slug (01_the_grove ...). The NN_ prefix
+  # sets both the narration ORDER and which images show for that project.
+  # Bundled INSIDE the repo (clips/sobha_projects) so the project is self-contained.
+  projects_root: /Users/ibrahim/Desktop/THC/bella/clips/sobha_projects
+  slide_seconds: 4.5             # how long each image stays before the next
 
 obs:
   host: localhost

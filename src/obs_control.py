@@ -47,6 +47,10 @@ class OBS:
             if len(self.talk_loops) > 1:
                 self._set_media(self.talk_src, random.choice(self.talk_loops))
 
+    def show_background(self, path: str):
+        # Swap the Background source to a specific file (one slide, or a video).
+        self._set_media(self.bg_src, path)
+
     def demo_background(self):
         if self.demos:
             self._set_media(self.bg_src, random.choice(self.demos))

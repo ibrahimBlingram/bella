@@ -72,6 +72,26 @@ class Brain:
             + "\n\n=== PRODUCT & THEME KNOWLEDGE (treat as fact) ===\n"
             + knowledge
         )
+        # On-demand full-record retrieval (all floor plans, FAQs, currencies).
+        # The compact index is always-on in `knowledge`; this adds the complete
+        # record for whichever project the current prompt is about.
+        self.retriever = None
+        ds = (cfg.get("data") or {}).get("sobha_dataset")
+        if ds:
+            try:
+                from sobha import SobhaData
+                self.retriever = SobhaData(ds)
+            except Exception as e:
+                print(f"[brain] Sobha retrieval disabled ({e}).")
+
+    def _retrieve(self, text: str) -> str:
+        if not self.retriever:
+            return ""
+        detail = self.retriever.match(text)
+        if not detail:
+            return ""
+        return ("\n\n=== FULL PROJECT DATA (use these EXACT facts; do not invent "
+                "beyond them) ===\n" + detail)
 
     def _gen_config(self, ground: bool):
         tools = [types.Tool(google_search=types.GoogleSearch())] if ground else None
@@ -133,6 +153,7 @@ class Brain:
             f"they apply. If you genuinely don't know a fact, say the team will "
             f"confirm — don't invent."
         )
+        prompt += self._retrieve(question)
         async for s in self._stream_sentences(prompt, ground):
             yield s
 
@@ -142,5 +163,24 @@ class Brain:
             topic=topic,
             covered="; ".join(covered[-12:]) or "(nothing yet)",
         ) + "\nReply in English."
+        prompt += self._retrieve(topic)
+        async for s in self._stream_sentences(prompt, ground=False):
+            yield s
+
+    async def narrate_project(self, name: str, facts: str, covered: list[str]):
+        """Spoken spotlight promoting one Sobha development (its images are on
+        screen). Uses ONLY the supplied facts; never invents prices/numbers."""
+        prompt = (
+            f'Do a lively 2-3 sentence spoken spotlight on the Sobha Realty '
+            f'development "{name}". Its photos are on screen right now, so paint '
+            f'the lifestyle and make it sound desirable. Drop ONE concrete hook '
+            f'(a starting price, a standout amenity, or who it is perfect for), '
+            f'and end with a light nudge to drop a comment or ask a question. '
+            f'Warm, excited, and fun — a great host, not a hard sell.\n'
+            f'Use ONLY the facts below; never invent prices, numbers, or features.\n'
+            f'Do NOT repeat points already covered today: '
+            f'{"; ".join(covered[-12:]) or "(nothing yet)"}.\n'
+            f'Reply in English.\n\n=== PROJECT FACTS ===\n{facts}'
+        )
         async for s in self._stream_sentences(prompt, ground=False):
             yield s
