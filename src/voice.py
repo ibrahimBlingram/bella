@@ -97,8 +97,45 @@ class KokoroTTS:
             yield chunk
 
 
+class EdgeTTS:
+    """Microsoft Edge neural voices — FREE, no API key (used for Arabic). Needs
+    internet, like Gemini already does. Streams MP3 which we decode to PCM16 mono
+    @ sample_rate with the ffmpeg bundled in imageio-ffmpeg. Resilient: a network
+    blip logs and skips the line rather than crashing the stream."""
+    def __init__(self, voice_id, sample_rate):
+        import imageio_ffmpeg
+        self.voice = voice_id or "ar-SA-ZariyahNeural"
+        self.sr = sample_rate
+        self.ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+
+    def _decode(self, mp3: bytes) -> bytes:
+        import subprocess
+        p = subprocess.run(
+            [self.ffmpeg, "-i", "pipe:0", "-ar", str(self.sr), "-ac", "1",
+             "-f", "s16le", "pipe:1"],
+            input=mp3, capture_output=True)
+        return p.stdout
+
+    async def synth(self, text: str):
+        import edge_tts
+        try:
+            comm = edge_tts.Communicate(text, self.voice)
+            mp3 = bytearray()
+            async for ch in comm.stream():
+                if ch["type"] == "audio":
+                    mp3 += ch["data"]
+        except Exception as e:
+            print(f"[voice] Arabic (edge-tts) failed: {e}")
+            return
+        if not mp3:
+            return
+        pcm = await asyncio.to_thread(self._decode, bytes(mp3))
+        if pcm:
+            yield pcm
+
+
 class ElevenLabsTTS:
-    """Cloud TTS. Used here for Arabic (multilingual model). PCM16 @ sample_rate."""
+    """Cloud TTS (paid). Optional Arabic fallback. PCM16 @ sample_rate."""
     def __init__(self, voice_id, model_id, sample_rate):
         from elevenlabs.client import ElevenLabs
         key = os.environ.get("ELEVENLABS_API_KEY")
@@ -131,12 +168,17 @@ class Voice:
         self.arabic = None
         ar = cfg["tts"].get("arabic") or {}
         if ar.get("enabled"):
+            engine = (ar.get("engine") or "edge").lower()
             try:
-                self.arabic = ElevenLabsTTS(
-                    voice_id=ar["voice_id"],
-                    model_id=ar.get("model_id", "eleven_flash_v2_5"),
-                    sample_rate=self.sr,
-                )
+                if engine == "elevenlabs":            # paid, optional
+                    self.arabic = ElevenLabsTTS(
+                        voice_id=ar.get("elevenlabs_voice_id") or ar["voice_id"],
+                        model_id=ar.get("model_id", "eleven_flash_v2_5"),
+                        sample_rate=self.sr,
+                    )
+                else:                                  # edge-tts: free, no key
+                    self.arabic = EdgeTTS(ar.get("voice_id"), self.sr)
+                print(f"[voice] Arabic enabled via {engine}")
             except Exception as e:
                 print(f"[voice] Arabic disabled ({e}); falling back to English only.")
         self.has_arabic = self.arabic is not None

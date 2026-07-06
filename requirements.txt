@@ -2,8 +2,9 @@
 google-genai>=1.0.0          # Gemini SDK (from google import genai)
 
 # Voice (install the one(s) you use)
-cartesia>=2.0.0              # Cartesia Sonic streaming TTS
-elevenlabs>=1.0.0            # ElevenLabs Flash streaming TTS
+edge-tts>=7.0.0             # FREE Microsoft neural TTS (Arabic) — no API key
+cartesia>=2.0.0              # Cartesia Sonic streaming TTS (optional)
+elevenlabs>=1.0.0            # ElevenLabs Flash streaming TTS (optional, paid)
 
 # Audio out -> virtual device (BlackHole on Mac)
 sounddevice>=0.4.6

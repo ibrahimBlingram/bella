@@ -6,7 +6,7 @@ drives an on-screen avatar in OBS that switches between an **idle** loop and a
 **talking** loop as she speaks.
 
 - **Brain** — Gemini (`google-genai`) with a small RAG knowledge base, streaming answers sentence-by-sentence.
-- **Voice** — local [Kokoro](https://github.com/hexgrad/kokoro) TTS (free, no key). Optional ElevenLabs fallback for Arabic.
+- **Voice** — local [Kokoro](https://github.com/hexgrad/kokoro) TTS for English (free, no key) and [edge-tts](https://github.com/rany2/edge-tts) neural voices for Arabic (also free, no key). Optional paid ElevenLabs path.
 - **Avatar / video** — OBS driven over WebSocket (`obsws-python`); instant idle↔talk switching by toggling source visibility.
 - **Live chat** — `TikTokLive` listener with auto-reconnect.
 - **Audio routing** — TTS is sent to a virtual audio device (BlackHole on macOS) that OBS captures.
@@ -26,7 +26,7 @@ cp .env.example .env      # then fill in your keys
 | Key | Needed for |
 | --- | --- |
 | `GEMINI_API_KEY` | Brain (free from [aistudio.google.com](https://aistudio.google.com)) |
-| `ELEVENLABS_API_KEY` | Arabic TTS fallback (optional) |
+| `ELEVENLABS_API_KEY` | Only if you switch Arabic to the paid ElevenLabs engine (optional; Arabic is free via edge-tts by default) |
 | `CARTESIA_API_KEY` | Alternative TTS (optional) |
 | `TIKTOK_USERNAME` | The handle to go live as (full run only) |
 | `EULERSTREAM_API_KEY` | Only if TikTokLive asks for one (optional) |

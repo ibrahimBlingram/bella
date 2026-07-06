@@ -12,10 +12,15 @@ tts:
   sample_rate: 24000             # MUST be 24000 for kokoro (do not change)
   output_device: "BlackHole 2ch"            # null = default speakers. Phase 2: "BlackHole 2ch" for OBS
   model_id: "sonic-3"            # unused by kokoro; only for cartesia/elevenlabs
-  arabic:                        # Arabic-only fallback via ElevenLabs (Sara)
-    enabled: false               # set false to go English-only
-    voice_id: "21m00Tcm4TlvDq8ikWAM"   # ElevenLabs voice id for Sara
-    model_id: "eleven_flash_v2_5"            # multilingual, supports Arabic, ~0.5 credit/char
+  arabic:                        # Arabic reply voice — auto-used when a comment is Arabic
+    enabled: true                # FREE via edge-tts (no key). set false for English-only
+    engine: edge                 # edge = free Microsoft neural voice | elevenlabs = paid
+    voice_id: "ar-SA-HamedNeural"        # edge-tts MALE Saudi voice (matches am_puck)
+    # other edge voices: ar-SA-ZariyahNeural (F), ar-EG-ShakirNeural (M, Egyptian),
+    #                    ar-EG-SalmaNeural (F, Egyptian), ar-AE-HamdanNeural (M, UAE)
+    # optional paid fallback (set engine: elevenlabs):
+    elevenlabs_voice_id: "21m00Tcm4TlvDq8ikWAM"
+    model_id: "eleven_flash_v2_5"
 
 stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
