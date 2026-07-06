@@ -167,9 +167,12 @@ class Brain:
         async for s in self._stream_sentences(prompt, ground=False):
             yield s
 
-    async def narrate_project(self, name: str, facts: str, covered: list[str]):
+    async def narrate_project(self, name: str, facts: str, covered: list[str],
+                              lang: str = "en"):
         """Spoken spotlight promoting one Sobha development (its images are on
-        screen). Uses ONLY the supplied facts; never invents prices/numbers."""
+        screen). Uses ONLY the supplied facts; never invents prices/numbers.
+        `lang` picks the reply language (en | ar)."""
+        langname = "Arabic" if lang == "ar" else "English"
         prompt = (
             f'Do a lively 2-3 sentence spoken spotlight on the Sobha Realty '
             f'development "{name}". Its photos are on screen right now, so paint '
@@ -180,7 +183,7 @@ class Brain:
             f'Use ONLY the facts below; never invent prices, numbers, or features.\n'
             f'Do NOT repeat points already covered today: '
             f'{"; ".join(covered[-12:]) or "(nothing yet)"}.\n'
-            f'Reply in English.\n\n=== PROJECT FACTS ===\n{facts}'
+            f'Reply in {langname}.\n\n=== PROJECT FACTS ===\n{facts}'
         )
         async for s in self._stream_sentences(prompt, ground=False):
             yield s
