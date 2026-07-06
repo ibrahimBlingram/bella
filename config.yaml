@@ -7,13 +7,13 @@ llm:
 
 tts:
   provider: kokoro               # <-- LOCAL voice. kokoro | cartesia | elevenlabs | gemini
-  voice_id: "af_heart"           # kokoro voice. others: af_bella, af_nicole, bf_emma ...
+  voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
   kokoro_lang: "a"               # 'a' US English, 'b' UK English
   sample_rate: 24000             # MUST be 24000 for kokoro (do not change)
   output_device: "BlackHole 2ch"            # null = default speakers. Phase 2: "BlackHole 2ch" for OBS
   model_id: "sonic-3"            # unused by kokoro; only for cartesia/elevenlabs
   arabic:                        # Arabic-only fallback via ElevenLabs (Sara)
-    enabled: true                # set false to go English-only
+    enabled: false               # set false to go English-only
     voice_id: "21m00Tcm4TlvDq8ikWAM"   # ElevenLabs voice id for Sara
     model_id: "eleven_flash_v2_5"            # multilingual, supports Arabic, ~0.5 credit/char
 
@@ -29,9 +29,9 @@ stream:
 data:
   # Full Sobha dataset — the compact index lives in knowledge/sobha_projects.md
   # (always-on); this file is retrieved per-project for complete detail
-  # (every floor plan, FAQ, currency) only when Bella is on that project.
+  # (every floor plan, FAQ, currency) only when Bello is on that project.
   sobha_dataset: /Users/ibrahim/Desktop/THC/bella/data/sobha_full_dataset.json
-  # The 33 CURATED, ORDERED projects that have on-screen visuals. Bella walks
+  # The 33 CURATED, ORDERED projects that have on-screen visuals. Bello walks
   # these 1->33 during idle time, promoting each while its images play in the
   # background, with a Dubai real-estate hook between projects so it never feels
   # like a dry catalog. Order + media come from media.projects_root folders.
@@ -49,6 +49,12 @@ obs:
   port: 4455
   password: "Dubai@2026"
   scene: "Live"
+  # Make the LIVE scene match the exported reel: full-screen background, a
+  # waist-up avatar bust pinned bottom-right, and a project title/price overlay
+  # that shows only while on a project. Needs OBS running to take effect; tune
+  # with `python tools/obs_apply_reel_layout.py`.
+  reel_layout: true
+  title_source: "BellaTitle"
   avatar_idle_source: "AvatarIdle"
   avatar_talk_source: "AvatarTalk"
   background_source: "Background"

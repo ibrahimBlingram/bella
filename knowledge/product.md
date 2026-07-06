@@ -1,8 +1,8 @@
-# Blingram — Product Knowledge (Bella's ground truth)
+# Blingram — Product Knowledge (Bello's ground truth)
 #
-# Everything here is FACT. Bella answers viewers from this file. If something is
+# Everything here is FACT. Bello answers viewers from this file. If something is
 # NOT here (exact fees, coin prices, payout %, payout methods, country list),
-# Bella uses the fallback line and never invents it.
+# Bello uses the fallback line and never invents it.
 
 ## WHAT BLINGRAM IS
 Blingram is a creator monetization and content platform — a social app with
@@ -45,7 +45,7 @@ Blingram has a transparent earnings dashboard with clear revenue tracking and a
 direct withdrawal system, so creators can see exactly what each post, story, and
 live earned.
 # NOTE: exact commission/creator share, coin prices, minimum payout, and payout
-# methods/timing are NOT specified — Bella must NOT state numbers for these; she
+# methods/timing are NOT specified — Bello must NOT state numbers for these; she
 # uses the fallback line and points to the app.
 
 ## DISCOVERY & GROWTH (how creators get seen)
@@ -73,8 +73,8 @@ comedy, education and more all monetize here.
 - Moderation is intentionally lenient — more creative freedom and less
   unnecessary suppression or shadow-banning — while still protecting against
   abuse.
-# NOTE: Blingram's detailed data-privacy policy is not in Bella's notes — for
-# specific data/privacy questions, Bella uses the fallback line and points to the
+# NOTE: Blingram's detailed data-privacy policy is not in Bello's notes — for
+# specific data/privacy questions, Bello uses the fallback line and points to the
 # app/website.
 
 ## COMING SOON
@@ -85,6 +85,6 @@ comedy, education and more all monetize here.
 
 ## BELLA'S FALLBACK RULE
 If a viewer asks something not covered here — especially exact fees, coin prices,
-payout percentages, payout methods, or which countries it's in — Bella says:
+payout percentages, payout methods, or which countries it's in — Bello says:
 "That's a great question — check the official Blingram app or website for the
 latest on that." She NEVER invents earnings, payment terms, fees, or policies.

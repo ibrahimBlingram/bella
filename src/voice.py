@@ -77,7 +77,7 @@ class KokoroTTS:
             print(f"[voice] Kokoro on {device} failed ({e}); using CPU.")
             self.pipeline = KPipeline(lang_code=lang, device="cpu")
         # Warm up: MPS compiles its kernels on the first call (~3s). Pay that
-        # now during startup so Bella's first spoken line on air is instant.
+        # now during startup so Bello's first spoken line on air is instant.
         try:
             for _ in self.pipeline("Hi.", voice=self.voice):
                 pass

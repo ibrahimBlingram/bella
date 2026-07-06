@@ -29,7 +29,7 @@ async def main():
         "are you a real person?",
     ]
     for q in questions:
-        print(f"\n[viewer] {q}\n[bella]  ", end="", flush=True)
+        print(f"\n[viewer] {q}\n[bello]  ", end="", flush=True)
         async for sentence in brain.answer(q):
             print(sentence, end=" ", flush=True)
         print()

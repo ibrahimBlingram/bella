@@ -148,7 +148,7 @@ class Brain:
         langname = "Arabic" if lang == "ar" else "English"
         prompt = (
             f'A viewer in the live chat just said: "{question}".\n'
-            f"Reply as Bella in {langname}, in 1-2 short, lively spoken sentences. "
+            f"Reply as Bello in {langname}, in 1-2 short, lively spoken sentences. "
             f"Be specific and use real Blingram facts from your knowledge whenever "
             f"they apply. If you genuinely don't know a fact, say the team will "
             f"confirm — don't invent."

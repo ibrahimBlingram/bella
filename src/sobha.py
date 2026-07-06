@@ -1,7 +1,7 @@
 """
 sobha.py — on-demand retrieval of FULL Sobha project records.
 
-The compact index (knowledge/sobha_projects.md) is always in Bella's system
+The compact index (knowledge/sobha_projects.md) is always in Bello's system
 prompt so she's aware of every project. This module holds the *complete* data —
 every floor plan, FAQ, amenity, landmark and currency — and hands back only the
 matching project's full record when she narrates or answers about it. That keeps

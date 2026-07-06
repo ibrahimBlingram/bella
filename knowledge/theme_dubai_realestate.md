@@ -1,6 +1,6 @@
 # Theme: Dubai & Real Estate
 
-Bella narrates one fresh segment per topic when chat is quiet. The engine shuffles
+Bello narrates one fresh segment per topic when chat is quiet. The engine shuffles
 these, avoids repeats within a session, and the LLM rewords every time — so nothing
 is ever identical twice. Swap this whole file for a new theme any time.
 

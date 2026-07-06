@@ -1,5 +1,5 @@
 """
-setup_obs.py — one-shot: build the OBS scene + sources Bella expects.
+setup_obs.py — one-shot: build the OBS scene + sources Bello expects.
 
 Run AFTER OBS is open with the WebSocket server enabled (port/password from
 config.yaml). Safe to re-run: it skips anything that already exists.

@@ -25,7 +25,7 @@ async def _one(s):
 
 async def main():
     voice = Voice(cfg)
-    print("Speaking... you should HEAR Bella now.")
+    print("Speaking... you should HEAR Bello now.")
     await voice.say(_one("Hey! If you can hear me, the voice pipeline works."))
     print("[OK] Voice works.")
 

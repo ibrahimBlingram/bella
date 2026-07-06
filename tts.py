@@ -1,5 +1,5 @@
 """
-tts.py  —  Bella voice layer (Phase 1: fully local via Kokoro)
+tts.py  —  Bello voice layer (Phase 1: fully local via Kokoro)
 ==============================================================
 
 Provider-agnostic TTS. Flip ONE line to swap engines:
@@ -27,7 +27,7 @@ SAMPLE_RATE = 24_000
 PROVIDER = "kokoro"
 
 # --- Kokoro settings ---
-KOKORO_VOICE = "af_heart"      # American-English female. af_bella / af_nicole / bf_emma ...
+KOKORO_VOICE = "am_puck"      # American-English female. af_bella / af_nicole / bf_emma ...
 KOKORO_LANG = "a"              # 'a' American English, 'b' British English
 
 # --- ElevenLabs settings (only used if PROVIDER == "elevenlabs") ---
@@ -184,12 +184,12 @@ class Speaker:
 
 
 # ============================================================================
-# Smoke test:  python tts.py "hello, I'm Bella"
+# Smoke test:  python tts.py "hello, I'm Bello"
 # ============================================================================
 
 if __name__ == "__main__":
     import sys
-    line = " ".join(sys.argv[1:]) or "Hey everyone, welcome to the stream! I'm Bella."
+    line = " ".join(sys.argv[1:]) or "Hey everyone, welcome to the stream! I'm Bello."
     print(f"[tts] provider={PROVIDER}  rate={SAMPLE_RATE}")
 
     async def _main():

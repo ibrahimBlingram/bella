@@ -7,7 +7,7 @@ main.py — the full live orchestrator (Phase 2b).
   idle      -> narrate next no-repeat topic (English) -> speak
   long idle -> swap background to a full-screen app demo
 
-A speak-lock means Bella never talks over herself. While she speaks the OBS
+A speak-lock means Bello never talks over himself. While she speaks the OBS
 avatar shows the TALK loop; when silent, the IDLE loop. Nothing here crashes the
 stream — the brain retries transient errors and the listener auto-reconnects.
 
@@ -39,8 +39,15 @@ async def _one(s: str):
     yield s
 
 
+def _price_of(proj) -> str:
+    for line in proj.facts.splitlines():
+        if line.startswith("Starting price"):
+            return line.split(":", 1)[1].split("|")[0].replace("*", "").strip()
+    return ""
+
+
 class Slideshow:
-    """Rotates a project's media in the OBS background while Bella talks about
+    """Rotates a project's media in the OBS background while Bello talks about
     it. Videos (if any) play first, then the images cycle every `seconds`. The
     background holds on the last project until the next project starts — so the
     Dubai-fact segments in between still show Sobha visuals, never a blank."""
@@ -118,6 +125,13 @@ async def main():
     obs = OBS(cfg)
     topics = TopicQueue(seeds)
 
+    # Optional: make the LIVE scene look like the exported reel (full-screen
+    # background, waist-up avatar bust bottom-right, project title/price overlay).
+    o = cfg.get("obs") or {}
+    if o.get("reel_layout"):
+        obs.title_src = o.get("title_source", "BellaTitle")
+        obs.apply_reel_layout()
+
     m = cfg.get("media") or {}
     featured = Featured((cfg.get("data") or {}).get("sobha_featured"),
                         m.get("projects_root"))
@@ -135,7 +149,10 @@ async def main():
     qa_cd = s["qa_cooldown"]
 
     speak_lock = asyncio.Lock()
-    state = {"last_activity": time.time(), "last_qa": 0.0, "demo_on": False}
+    # viewers: None = unknown (offline / before first count) -> treated as present
+    # so behaviour is unchanged when we can't tell. 0 = empty room -> go silent.
+    state = {"last_activity": time.time(), "last_qa": 0.0,
+             "demo_on": False, "viewers": None, "silent": False}
     obs.set_talking(False)
 
     async def speak(sentences, lang="en"):
@@ -149,8 +166,13 @@ async def main():
     async def handle_events():
         while True:
             kind, name, text = await events.get()
+            if kind == "viewers":                  # presence update, not activity
+                state["viewers"] = name
+                continue
             state["last_activity"] = time.time()
             state["demo_on"] = False               # someone's here -> leave demo mode
+            if state["viewers"] in (None, 0):      # a join/comment means presence
+                state["viewers"] = 1               # (next count event corrects it)
             if kind == "join":
                 greet = random.choice(persona["greetings"]).format(name=name)
                 await speak(_one(greet))
@@ -164,11 +186,48 @@ async def main():
                 asked = featured.match(text)
                 if asked:
                     slideshow.start(asked)
+                    obs.set_title(asked.name, _price_of(asked))
                 await speak(brain.answer(text, lang), lang=lang)
 
+    async def silent_tour():
+        """Nobody in the live: cycle every featured project's images silently,
+        with the avatar hidden. Cancelled the moment someone shows up."""
+        media = [mp for pr in featured.projects for mp in pr.media]
+        if not media:
+            return
+        i = 0
+        while True:
+            obs.show_background(media[i % len(media)])
+            i += 1
+            await asyncio.sleep(slideshow.seconds)
+
     async def idle_engine():
+        silent_task = None
         while True:
             await asyncio.sleep(2)
+
+            present = state["viewers"] is None or state["viewers"] > 0
+            if not present:
+                # Empty room -> silent image slideshow, avatar hidden, no talking.
+                if voice.speaking.is_set():
+                    continue                       # let any in-flight line finish
+                if not state["silent"]:
+                    slideshow.stop()
+                    slideshow.current = None
+                    obs.hide_avatar()
+                    obs.hide_title()
+                    state["silent"] = True
+                    if featured.projects:
+                        silent_task = asyncio.create_task(silent_tour())
+                continue
+            if state["silent"]:                    # someone arrived -> resume
+                if silent_task:
+                    silent_task.cancel()
+                    silent_task = None
+                slideshow.current = None
+                obs.set_talking(False)             # restore the idle avatar loop
+                state["silent"] = False
+
             if voice.speaking.is_set():
                 continue
             quiet = time.time() - state["last_activity"]
@@ -181,10 +240,12 @@ async def main():
                 kind, payload = next(segments)
                 if kind == "project":
                     slideshow.start(payload)        # its images fill the screen
+                    obs.set_title(payload.name, _price_of(payload))
                     await speak(brain.narrate_project(
                         payload.name, payload.facts, topics.covered))
                     topics.mark(payload.name)
                 else:
+                    obs.hide_title()                # Dubai hook, not a project
                     await speak(brain.narrate(payload, topics.covered))
                     topics.mark(payload)
                 state["last_activity"] = time.time()
@@ -200,7 +261,7 @@ async def main():
                 topics.mark(topic)
                 state["last_activity"] = time.time()
 
-    print(f"Bella LIVE | theme={theme} | listening to {username}")
+    print(f"Bello LIVE | theme={theme} | listening to {username}")
     await asyncio.gather(listener.run(), handle_events(), idle_engine())
 
 

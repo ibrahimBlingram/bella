@@ -1,8 +1,8 @@
 """
-test_obs.py — Phase 2a: see Bella in OBS, no TikTok yet.
+test_obs.py — Phase 2a: see Bello in OBS, no TikTok yet.
 
-Bella hosts the theme on a loop (idle narration). As she speaks, OBS switches
-the avatar from the IDLE loop to the TALK loop and back, and her audio goes to
+Bello hosts the theme on a loop (idle narration). As he speaks, OBS switches
+the avatar from the IDLE loop to the TALK loop and back, and his audio goes to
 the virtual audio device OBS is capturing. This is the full OBS experience minus
 the live chat — proof that visuals + audio are wired correctly.
 
@@ -65,7 +65,7 @@ async def main():
 
         async def seg():
             async for s in brain.narrate(topic, topics.covered):
-                print(f"  [bella] {s}")
+                print(f"  [bello] {s}")
                 yield s
 
         # on_start -> switch to TALK loop; on_stop -> back to IDLE loop

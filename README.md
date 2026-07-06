@@ -1,6 +1,6 @@
-# Bella — TikTok-Live AI Streaming Host
+# Bello — TikTok-Live AI Streaming Host
 
-Bella is an autonomous live-streaming host for TikTok. She reads the live chat,
+Bello is an autonomous live-streaming host for TikTok. He reads the live chat,
 answers viewers in a consistent persona, narrates topics when chat is quiet, and
 drives an on-screen avatar in OBS that switches between an **idle** loop and a
 **talking** loop as she speaks.
@@ -39,7 +39,7 @@ Configuration (model, voice, theme, OBS sources, idle timings) lives in
 
 These are **not** pip-installable and are only needed for the OBS/live stages:
 
-- **BlackHole 2ch** virtual audio driver (so OBS can capture Bella's voice).
+- **BlackHole 2ch** virtual audio driver (so OBS can capture Bello's voice).
 - **OBS** running with WebSocket enabled on `:4455`, and a scene named `Live`
   containing sources `AvatarIdle`, `AvatarTalk`, `Background`.
 - The TikTok account actually **live** (for `test_listener.py` / `main.py`).
@@ -69,8 +69,8 @@ python src/main.py
 The orchestrator: greets joiners by name (template, no LLM cost), answers
 comments after a human-like delay (Arabic if the comment is Arabic and the
 Arabic voice is enabled), narrates no-repeat topics when idle, and swaps to a
-full-screen app demo after a long idle. A speak-lock keeps Bella from talking
-over herself; the brain retries transient errors and the listener auto-reconnects.
+full-screen app demo after a long idle. A speak-lock keeps Bello from talking
+over himself; the brain retries transient errors and the listener auto-reconnects.
 
 ## Repository layout
 
@@ -79,6 +79,6 @@ src/            core modules (brain, voice, obs_control, listener, topics, main)
 knowledge/      RAG knowledge base (product + monthly theme files)
 clips/          avatar idle/talk loops + demo backgrounds
 config.yaml     model, voice, theme, OBS sources, timings
-persona.yaml    Bella's persona + narration prompt
+persona.yaml    Bello's persona + narration prompt
 test_*.py       staged smoke tests (see table above)
 ```

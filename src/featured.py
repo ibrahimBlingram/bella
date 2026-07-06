@@ -3,7 +3,7 @@ featured.py — the 33 curated Sobha projects that have on-screen visuals.
 
 Each project maps to a media subfolder named `NN_slug` (e.g. 01_the_grove) of
 webp images — and any videos you drop in later. The idle loop walks these
-projects IN ORDER (1..33); while Bella narrates project N, its media plays in
+projects IN ORDER (1..33); while Bello narrates project N, its media plays in
 the OBS background. Facts come from the ordered manifest JSON, but the folder's
 `NN_` prefix is the source of truth for both ORDER and which images to show.
 

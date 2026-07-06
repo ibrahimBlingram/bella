@@ -1,9 +1,9 @@
 """
 test_live.py — see/hear how the live goes, with NO OBS and NO TikTok.
 
-Bella hosts the current month's THEME on her own: she picks a fresh topic, talks
+Bello hosts the current month's THEME on his own: he picks a fresh topic, talks
 about it for a couple of sentences, ties it back to Blingram, then moves to the
-next topic — on a loop, never repeating. This is exactly what she does whenever
+next topic — on a loop, never repeating. This is exactly what he does whenever
 chat is quiet (the "idle narration" half of the stream).
 
 The other half — answering live comments — is what test_chat.py already showed.
@@ -62,7 +62,7 @@ async def main():
 
         async def segment():
             async for s in brain.narrate(topic, topics.covered):
-                print(f"  [bella] {s}")
+                print(f"  [bello] {s}")
                 yield s
 
         await voice.say(segment())

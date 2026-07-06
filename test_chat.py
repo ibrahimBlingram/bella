@@ -39,7 +39,7 @@ async def main():
 
         async def spoken():
             async for s in brain.answer(q, lang):
-                print(f"[bella]  {s}")
+                print(f"[bello]  {s}")
                 yield s
 
         await voice.say(spoken(), lang=lang)

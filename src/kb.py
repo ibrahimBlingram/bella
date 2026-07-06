@@ -1,5 +1,5 @@
 """
-kb.py — knowledge loader for Bella's RAG context.
+kb.py — knowledge loader for Bello's RAG context.
 
 Drop ANY number of .md files into the knowledge/ folder and they all get loaded
 automatically. The ONLY reserved naming rule:
