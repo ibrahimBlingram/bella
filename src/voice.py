@@ -1,12 +1,24 @@
 """
 voice.py — streaming TTS with per-language routing.
 
-- English (and everything non-Arabic): Kokoro, local, free.
-- Arabic: ElevenLabs (e.g. the "Sara" voice), only if tts.arabic.enabled and a
-  key is set. If Arabic isn't enabled, callers keep using English/Kokoro.
+The primary engine is chosen by tts.provider in config.yaml:
 
-Both engines output PCM16 mono @ tts.sample_rate (24000), so one playback path
-handles either. espeak-ng is auto-located on Windows/Mac/Linux.
+- kokoro           : local 82M model, English only, free (Mac/CPU/CUDA).
+- chatterbox       : Chatterbox Turbo (350M), English only, CUDA only. Supports
+                     inline paralinguistic tags ([laugh], [cough], [sigh],
+                     [chuckle]) and zero-shot voice cloning from a reference clip.
+- chatterbox_multi : Chatterbox Multilingual V3 (500M), 23 languages incl.
+                     Arabic + English, CUDA only. One model serves both languages
+                     (routed by lang) with per-language reference audio.
+
+For English-only primaries (kokoro, chatterbox), Arabic comments route to a
+separate engine when tts.arabic.enabled:
+- edge       : Microsoft neural voices, FREE, no key (default).
+- elevenlabs : paid cloud fallback.
+
+Every engine's synth(text, lang) yields raw PCM16 mono bytes @ tts.sample_rate
+(24000), so one playback path handles all of them. espeak-ng (Kokoro) is
+auto-located on Windows/Mac/Linux; Chatterbox requires CUDA.
 """
 import os
 import glob
@@ -85,7 +97,7 @@ class KokoroTTS:
             pass
         print(f"[voice] Kokoro on {device or 'cpu'} (warmed up)")
 
-    async def synth(self, text: str):
+    async def synth(self, text: str, lang: str = "en"):
         def gen():
             for result in self.pipeline(text, voice=self.voice):
                 audio = result[2] if isinstance(result, tuple) else result.audio
@@ -116,7 +128,7 @@ class EdgeTTS:
             input=mp3, capture_output=True)
         return p.stdout
 
-    async def synth(self, text: str):
+    async def synth(self, text: str, lang: str = "en"):
         import edge_tts
         try:
             comm = edge_tts.Communicate(text, self.voice)
@@ -146,7 +158,7 @@ class ElevenLabsTTS:
         self.model = model_id
         self.sr = sample_rate
 
-    async def synth(self, text: str):
+    async def synth(self, text: str, lang: str = "en"):
         def gen():
             return self.client.text_to_speech.convert(
                 voice_id=self.voice, model_id=self.model, text=text,
@@ -156,6 +168,81 @@ class ElevenLabsTTS:
             yield chunk
 
 
+def _tensor_to_pcm16(wav) -> bytes:
+    """Chatterbox returns a torch tensor -> raw PCM16 mono bytes."""
+    audio = wav.squeeze().detach().cpu().numpy()
+    audio = np.asarray(audio, dtype=np.float32)
+    return (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+
+
+class ChatterboxTurboTTS:
+    """Chatterbox Turbo (350M) — English only, CUDA only, MIT-licensed.
+    Zero-shot voice cloning from a 5-10s reference clip and inline paralinguistic
+    tags ([laugh], [cough], [sigh], [chuckle]). PCM16 mono @ model.sr (24000).
+    Not streaming: generates the whole line, then yields it once."""
+    def __init__(self, cfg):
+        from chatterbox.tts_turbo import ChatterboxTurboTTS as _Model
+        tts = cfg["tts"]
+        self.model = _Model.from_pretrained(device="cuda")
+        self.ref = tts.get("chatterbox_ref_audio")
+        self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
+        self.sr = getattr(self.model, "sr", 24000)
+        if tts.get("sample_rate") != self.sr:
+            print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
+                  f"set tts.sample_rate {self.sr}.")
+        print(f"[voice] Chatterbox Turbo (English) ready on cuda")
+
+    def _synth_sync(self, text):
+        wav = self.model.generate(
+            text, audio_prompt_path=self.ref, exaggeration=self.exaggeration)
+        return _tensor_to_pcm16(wav)
+
+    async def synth(self, text: str, lang: str = "en"):
+        try:
+            pcm = await asyncio.to_thread(self._synth_sync, text)
+        except Exception as e:
+            print(f"[voice] Chatterbox (Turbo) failed: {e}")
+            return
+        if pcm:
+            yield pcm
+
+
+class ChatterboxMultiTTS:
+    """Chatterbox Multilingual V3 (500M) — 23 languages incl. Arabic + English,
+    CUDA only, MIT-licensed. One model serves every language, routed by lang.
+    Reference audio MUST match the target language (English ref for English,
+    Arabic ref for Arabic) or the accent bleeds through. PCM16 mono @ model.sr."""
+    def __init__(self, cfg):
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS as _Model
+        tts = cfg["tts"]
+        self.model = _Model.from_pretrained(device="cuda")
+        self.ref_en = tts.get("chatterbox_ref_audio")
+        self.ref_ar = tts.get("chatterbox_ref_audio_ar") or self.ref_en
+        self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
+        self.sr = getattr(self.model, "sr", 24000)
+        if tts.get("sample_rate") != self.sr:
+            print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
+                  f"set tts.sample_rate {self.sr}.")
+        print(f"[voice] Chatterbox Multilingual (Arabic + English) ready on cuda")
+
+    def _synth_sync(self, text, lang_id, ref):
+        wav = self.model.generate(
+            text, language_id=lang_id, audio_prompt_path=ref,
+            exaggeration=self.exaggeration)
+        return _tensor_to_pcm16(wav)
+
+    async def synth(self, text: str, lang: str = "en"):
+        lang_id = "ar" if lang == "ar" else "en"
+        ref = self.ref_ar if lang_id == "ar" else self.ref_en
+        try:
+            pcm = await asyncio.to_thread(self._synth_sync, text, lang_id, ref)
+        except Exception as e:
+            print(f"[voice] Chatterbox (Multilingual, {lang_id}) failed: {e}")
+            return
+        if pcm:
+            yield pcm
+
+
 # --------------------------------------------------------------------------
 # Voice manager (routes by language)
 # --------------------------------------------------------------------------
@@ -163,28 +250,43 @@ class Voice:
     def __init__(self, cfg):
         self.sr = cfg["tts"]["sample_rate"]
         self.device = cfg["tts"]["output_device"]
-        self.english = KokoroTTS(cfg)            # primary
+        provider = (cfg["tts"].get("provider") or "kokoro").lower()
 
+        # Primary engine. chatterbox_multi is multilingual — the same model also
+        # serves Arabic (routed by lang), so no separate Arabic engine is needed.
+        self.multilingual = False
+        if provider == "chatterbox":
+            self.english = ChatterboxTurboTTS(cfg)     # English only, CUDA
+        elif provider == "chatterbox_multi":
+            self.english = ChatterboxMultiTTS(cfg)     # Arabic + English, CUDA
+            self.multilingual = True
+        else:
+            self.english = KokoroTTS(cfg)              # local, English only
+
+        # Separate Arabic engine — only when the primary can't speak Arabic.
         self.arabic = None
-        ar = cfg["tts"].get("arabic") or {}
-        if ar.get("enabled"):
-            engine = (ar.get("engine") or "edge").lower()
-            try:
-                if engine == "elevenlabs":            # paid, optional
-                    self.arabic = ElevenLabsTTS(
-                        voice_id=ar.get("elevenlabs_voice_id") or ar["voice_id"],
-                        model_id=ar.get("model_id", "eleven_flash_v2_5"),
-                        sample_rate=self.sr,
-                    )
-                else:                                  # edge-tts: free, no key
-                    self.arabic = EdgeTTS(ar.get("voice_id"), self.sr)
-                print(f"[voice] Arabic enabled via {engine}")
-            except Exception as e:
-                print(f"[voice] Arabic disabled ({e}); falling back to English only.")
-        self.has_arabic = self.arabic is not None
+        if not self.multilingual:
+            ar = cfg["tts"].get("arabic") or {}
+            if ar.get("enabled"):
+                engine = (ar.get("engine") or "edge").lower()
+                try:
+                    if engine == "elevenlabs":            # paid, optional
+                        self.arabic = ElevenLabsTTS(
+                            voice_id=ar.get("elevenlabs_voice_id") or ar["voice_id"],
+                            model_id=ar.get("model_id", "eleven_flash_v2_5"),
+                            sample_rate=self.sr,
+                        )
+                    else:                                  # edge-tts: free, no key
+                        self.arabic = EdgeTTS(ar.get("voice_id"), self.sr)
+                    print(f"[voice] Arabic enabled via {engine}")
+                except Exception as e:
+                    print(f"[voice] Arabic disabled ({e}); falling back to English only.")
+        self.has_arabic = self.multilingual or self.arabic is not None
         self.speaking = asyncio.Event()
 
     def _engine(self, lang):
+        if self.multilingual:                # one model handles every language
+            return self.english
         return self.arabic if (lang == "ar" and self.arabic) else self.english
 
     async def say(self, sentences, lang="en", on_start=None, on_stop=None):
@@ -196,7 +298,7 @@ class Voice:
         stream.start()
         try:
             async for sentence in sentences:
-                async for pcm in engine.synth(sentence):
+                async for pcm in engine.synth(sentence, lang):
                     if not started:
                         started = True
                         self.speaking.set()

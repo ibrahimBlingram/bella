@@ -2,12 +2,14 @@
 google-genai>=1.0.0          # Gemini SDK (from google import genai)
 
 # Voice (install the one(s) you use)
+chatterbox-tts              # Resemble AI Chatterbox (Turbo + Multilingual), MIT, CUDA only
 edge-tts>=7.0.0             # FREE Microsoft neural TTS (Arabic) — no API key
 cartesia>=2.0.0              # Cartesia Sonic streaming TTS (optional)
 elevenlabs>=1.0.0            # ElevenLabs Flash streaming TTS (optional, paid)
 
-# Audio out -> virtual device (BlackHole on Mac)
+# Audio out -> virtual device (BlackHole on Mac, PulseAudio null sink on Linux)
 sounddevice>=0.4.6
+soundfile                   # read/write voice-clone reference wavs
 numpy
 
 # Stream + OBS
