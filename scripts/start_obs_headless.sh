@@ -65,12 +65,12 @@ INI
 Name=Bella
 
 [Video]
-BaseCX=1080
-BaseCY=1920
-OutputCX=1080
-OutputCY=1920
+BaseCX=720
+BaseCY=1280
+OutputCX=720
+OutputCY=1280
 FPSType=1
-FPSCommon=24
+FPSCommon=20
 
 [Output]
 Mode=Simple

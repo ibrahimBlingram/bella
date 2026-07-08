@@ -29,7 +29,13 @@ class OBS:
             self._set_media(self.talk_src, random.choice(self.talk_loops))
 
     def _set_media(self, source, path):
+        # Media (video) sources use "local_file".
         self.c.set_input_settings(source, {"local_file": path}, overlay=True)
+
+    def _set_image(self, source, path):
+        # Image sources use "file". Still JPG/PNG must be an image_source — a
+        # media source clears to black when the single frame "ends".
+        self.c.set_input_settings(source, {"file": path}, overlay=True)
 
     def _set_visible(self, source, on):
         item_id = self.c.get_scene_item_id(self.scene, source).scene_item_id
@@ -171,9 +177,9 @@ class OBS:
         self._order_layers()
 
     def show_background(self, path: str):
-        # Swap the Background source to a specific file (one slide, or a video).
-        self._set_media(self.bg_src, path)
+        # Swap the Background image source to a specific still (one slide).
+        self._set_image(self.bg_src, path)
 
     def demo_background(self):
         if self.demos:
-            self._set_media(self.bg_src, random.choice(self.demos))
+            self._set_image(self.bg_src, random.choice(self.demos))
