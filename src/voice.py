@@ -175,6 +175,20 @@ def _tensor_to_pcm16(wav) -> bytes:
     return (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
 
 
+def _resolve_ref(path, label):
+    """Return a usable voice-clone reference path, or None if it's unset/missing.
+    A missing file is fine — Chatterbox falls back to its built-in default voice,
+    so you can go live before you've recorded Bella's clone refs."""
+    if path and os.path.exists(path):
+        return path
+    if path:
+        print(f"[voice] {label} ref not found ({path}); using Chatterbox's "
+              f"default voice. Drop the file in and restart to clone Bella.")
+    else:
+        print(f"[voice] no {label} ref set; using Chatterbox's default voice.")
+    return None
+
+
 class ChatterboxTurboTTS:
     """Chatterbox Turbo (350M) — English only, CUDA only, MIT-licensed.
     Zero-shot voice cloning from a 5-10s reference clip and inline paralinguistic
@@ -184,7 +198,7 @@ class ChatterboxTurboTTS:
         from chatterbox.tts_turbo import ChatterboxTurboTTS as _Model
         tts = cfg["tts"]
         self.model = _Model.from_pretrained(device="cuda")
-        self.ref = tts.get("chatterbox_ref_audio")
+        self.ref = _resolve_ref(tts.get("chatterbox_ref_audio"), "English")
         self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
         self.sr = getattr(self.model, "sr", 24000)
         if tts.get("sample_rate") != self.sr:
@@ -216,8 +230,9 @@ class ChatterboxMultiTTS:
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS as _Model
         tts = cfg["tts"]
         self.model = _Model.from_pretrained(device="cuda")
-        self.ref_en = tts.get("chatterbox_ref_audio")
-        self.ref_ar = tts.get("chatterbox_ref_audio_ar") or self.ref_en
+        self.ref_en = _resolve_ref(tts.get("chatterbox_ref_audio"), "English")
+        self.ref_ar = _resolve_ref(
+            tts.get("chatterbox_ref_audio_ar"), "Arabic") or self.ref_en
         self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
         self.sr = getattr(self.model, "sr", 24000)
         if tts.get("sample_rate") != self.sr:
