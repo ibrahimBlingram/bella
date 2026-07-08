@@ -18,7 +18,8 @@ apt-get update -qq
 apt-get install -y -qq software-properties-common
 add-apt-repository -y ppa:obsproject/obs-studio || true
 apt-get update -qq
-apt-get install -y -qq ffmpeg xvfb obs-studio pulseaudio pulseaudio-utils espeak-ng tmux git
+apt-get install -y -qq ffmpeg xvfb obs-studio pulseaudio pulseaudio-utils espeak-ng \
+    libportaudio2 libasound2-plugins tmux git
 
 echo "[setup_vast] starting PulseAudio + null sink (OBS captures its monitor)..."
 pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
