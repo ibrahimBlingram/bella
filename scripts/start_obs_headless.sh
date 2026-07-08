@@ -70,7 +70,7 @@ BaseCY=1920
 OutputCX=1080
 OutputCY=1920
 FPSType=1
-FPSCommon=30
+FPSCommon=24
 
 [Output]
 Mode=Simple

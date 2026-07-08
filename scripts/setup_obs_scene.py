@@ -96,15 +96,22 @@ def main():
     background = o["demo_backgrounds"][0]
 
     # Media sources (looping avatar clips). ffmpeg_source is the OBS media kind.
+    # hw_decode -> decode on the GPU (NVDEC) so the CPU/llvmpipe compositor keeps
+    # up and the avatar doesn't stutter.
     _create_input(o["avatar_idle_source"], "ffmpeg_source",
-                  {"local_file": idle_clip, "looping": True, "is_local_file": True},
+                  {"local_file": idle_clip, "looping": True, "is_local_file": True,
+                   "hw_decode": True},
                   enabled=True)
     _create_input(o["avatar_talk_source"], "ffmpeg_source",
-                  {"local_file": talk_clip, "looping": True, "is_local_file": True},
+                  {"local_file": talk_clip, "looping": True, "is_local_file": True,
+                   "hw_decode": True},
                   enabled=False)   # hidden at start; main.py toggles talk/idle
-    # Image background.
-    _create_input(o["background_source"], "image_source",
-                  {"file": background}, enabled=True)
+    # Background is a MEDIA source (not image) so obs_control.show_background()'s
+    # local_file swap works — that's how the Sobha project photos get cycled in.
+    _create_input(o["background_source"], "ffmpeg_source",
+                  {"local_file": background, "looping": True, "is_local_file": True,
+                   "hw_decode": True},
+                  enabled=True)
     # Audio capture of the PulseAudio null-sink monitor (Bella's TTS output).
     _create_input(AUDIO_SOURCE, "pulse_input_capture",
                   {"device_id": AUDIO_DEVICE_ID}, enabled=True)
