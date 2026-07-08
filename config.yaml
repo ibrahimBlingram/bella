@@ -76,6 +76,10 @@ obs:
   avatar_idle_loops:
     - "/root/bella/clips/avatar_idle_loops/idle.mp4"
   avatar_talk_loops:
-    - "/root/bella/clips/avatar_talk_loops/talk.mp4"
+    - "/root/bella/clips/avatar_talk_loops/talking1.mp4"
+    - "/root/bella/clips/avatar_talk_loops/talking2.mp4"
+    - "/root/bella/clips/avatar_talk_loops/talking3.mp4"
   demo_backgrounds:
-    - "/root/bella/clips/backgrounds/background.jpg"
+    - "/root/bella/clips/Background/B1.png"
+    - "/root/bella/clips/Background/B2.png"
+    - "/root/bella/clips/Background/B3.png"

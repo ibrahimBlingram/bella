@@ -17,6 +17,7 @@ Safe to re-run: it skips anything that already exists.
     DISPLAY=:99 python scripts/setup_obs_scene.py
 """
 import os
+import sys
 from pathlib import Path
 
 import yaml
@@ -131,8 +132,16 @@ def main():
         print("[warn] TIKTOK_SERVER_URL / TIKTOK_STREAM_KEY not set — skipping "
               "stream config. Fill them in .env and re-run to enable streaming.")
 
+    # Optionally start the RTMP stream right away:  --start-stream
+    if "--start-stream" in sys.argv:
+        try:
+            c.start_stream()
+            print("[OK] streaming started -> TikTok")
+        except Exception as e:
+            print(f"[warn] start_stream failed: {e}")
+
     print(f"\n[OK] OBS scene '{scene}' ready. Start streaming with "
-          "c.start_stream() or the OBS 'Start Streaming' button.")
+          "'--start-stream', c.start_stream(), or the OBS 'Start Streaming' button.")
 
 
 if __name__ == "__main__":

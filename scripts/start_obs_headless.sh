@@ -1,37 +1,116 @@
 #!/bin/bash
 # start_obs_headless.sh — launch OBS on the virtual display :99 (no monitor).
 #
-# Assumes setup_vast.sh already created the Xvfb :99 display and the PulseAudio
-# null sink. Run from the repo root:
+# A fresh OBS won't enable the WebSocket server and shows a first-run wizard —
+# both fatal with no screen. So this seeds OBS's config ONCE (idempotent: it
+# never overwrites an existing config, so the scene you build later survives):
+#   * WebSocket enabled on :4455, no auth  (matches config.yaml obs.password "")
+#   * skip the first-run wizard
+#   * a "Bella" profile: vertical 1080x1920 TikTok canvas, 30 fps, NVENC @ 6 Mbps
 #
+# Run from the repo root:
 #     bash scripts/start_obs_headless.sh
-#
-# OBS starts with the WebSocket server enabled (config it once via the OBS
-# profile, or it defaults to :4455). Then build the scene:
-#
+# Then build the scene:
 #     DISPLAY=:99 python scripts/setup_obs_scene.py
 export DISPLAY=:99
+OBS_CFG="$HOME/.config/obs-studio"
 
-# Make sure the display exists (setup_vast.sh normally starts it).
+# --- make sure the virtual display + audio sink are up ---
 if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
     echo "[start_obs] Xvfb :99 not running — starting it..."
     Xvfb :99 -screen 0 1920x1080x24 &
     sleep 2
 fi
-
-# Make sure PulseAudio + the null sink are up.
 pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
 pactl load-module module-null-sink sink_name=bella_audio \
     sink_properties=device.description="BellaAudio" 2>/dev/null || true
 pactl set-default-sink bella_audio 2>/dev/null || true
 
+# --- seed OBS config once (never clobber an existing setup) ---
+if [ ! -d "$OBS_CFG" ]; then
+    echo "[start_obs] seeding OBS config (WebSocket + Bella profile)..."
+    mkdir -p "$OBS_CFG/plugin_config/obs-websocket"
+    mkdir -p "$OBS_CFG/basic/profiles/Bella"
+    mkdir -p "$OBS_CFG/basic/scenes"
+
+    # WebSocket: enabled, no auth, port 4455.
+    cat > "$OBS_CFG/plugin_config/obs-websocket/config.json" <<'JSON'
+{
+    "alerts_enabled": false,
+    "auth_required": false,
+    "first_load": false,
+    "server_enabled": true,
+    "server_password": "",
+    "server_port": 4455
+}
+JSON
+
+    # Global: skip the first-run wizard, select the Bella profile.
+    cat > "$OBS_CFG/global.ini" <<'INI'
+[General]
+FirstRun=false
+LastVersion=503316480
+
+[Basic]
+Profile=Bella
+ProfileDir=Bella
+SceneCollection=Bella
+SceneCollectionFile=Bella
+INI
+
+    # Profile: vertical TikTok canvas + NVENC. If NVENC is missing OBS falls back
+    # to x264 automatically (won't crash), but every card we picked has NVENC.
+    cat > "$OBS_CFG/basic/profiles/Bella/basic.ini" <<'INI'
+[General]
+Name=Bella
+
+[Video]
+BaseCX=1080
+BaseCY=1920
+OutputCX=1080
+OutputCY=1920
+FPSType=1
+FPSCommon=30
+
+[Output]
+Mode=Simple
+
+[SimpleOutput]
+VBitrate=6000
+StreamEncoder=jim_nvenc
+ABitrate=160
+
+[Audio]
+SampleRate=48000
+ChannelSetup=Stereo
+INI
+
+    # Empty scene collection — setup_obs_scene.py builds the "Live" scene over
+    # the WebSocket and OBS persists it here.
+    cat > "$OBS_CFG/basic/scenes/Bella.json" <<'JSON'
+{
+    "current_scene": "",
+    "current_program_scene": "",
+    "name": "Bella",
+    "scene_order": [],
+    "sources": [],
+    "groups": []
+}
+JSON
+else
+    echo "[start_obs] existing OBS config found — leaving it untouched."
+fi
+
+# --- launch OBS ---
 if pgrep -x obs >/dev/null 2>&1; then
     echo "[start_obs] OBS already running on :99"
     exit 0
 fi
-
-# --minimize-to-tray keeps it out of the (nonexistent) foreground; the
-# WebSocket server + scene run fine headlessly.
-obs --minimize-to-tray --disable-shutdown-check 2>/dev/null &
-sleep 5
-echo "[start_obs] OBS running headlessly on :99 (WebSocket :4455)"
+obs --minimize-to-tray --disable-shutdown-check \
+    --profile Bella --collection Bella 2>/dev/null &
+sleep 6
+if pgrep -x obs >/dev/null 2>&1; then
+    echo "[start_obs] OBS running headlessly on :99 (WebSocket :4455, no auth)"
+else
+    echo "[start_obs] WARNING: OBS did not stay up — check 'DISPLAY=:99 obs' output."
+fi
