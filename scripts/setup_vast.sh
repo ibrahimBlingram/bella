@@ -28,6 +28,14 @@ pactl load-module module-null-sink sink_name=bella_audio \
 # Make the null sink the default so TTS (output_device: null) lands in it.
 pactl set-default-sink bella_audio 2>/dev/null || true
 
+# Route ALSA's default device to PulseAudio. Without this, sounddevice/PortAudio
+# (output_device: null) writes to a dead ALSA device and Bella's voice never
+# reaches the bella_audio sink -> OBS records silence.
+cat > /etc/asound.conf <<'EOF'
+pcm.!default { type pulse }
+ctl.!default { type pulse }
+EOF
+
 echo "[setup_vast] starting virtual display :99 (1920x1080)..."
 if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
     Xvfb :99 -screen 0 1920x1080x24 &

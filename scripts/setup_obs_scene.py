@@ -108,9 +108,10 @@ def main():
                   enabled=False)   # hidden at start; main.py toggles talk/idle
     # Background is a MEDIA source (not image) so obs_control.show_background()'s
     # local_file swap works — that's how the Sobha project photos get cycled in.
+    # NO hw_decode here: the background loads STILL IMAGES (png/jpg), which the
+    # GPU decoder (NVDEC) can't handle — hw_decode makes them render BLACK.
     _create_input(o["background_source"], "ffmpeg_source",
-                  {"local_file": background, "looping": True, "is_local_file": True,
-                   "hw_decode": True},
+                  {"local_file": background, "looping": True, "is_local_file": True},
                   enabled=True)
     # Audio capture of the PulseAudio null-sink monitor (Bella's TTS output).
     _create_input(AUDIO_SOURCE, "pulse_input_capture",
