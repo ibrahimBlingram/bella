@@ -82,28 +82,24 @@ class OBS:
         except Exception as e:
             print(f"[obs] cover_background skipped: {e}")
 
-    def bust_avatar(self, height_frac=0.21, keep_top=0.79, head_pad=0.055, margin=24):
-        """Crop both avatar loops to a waist-up bust and pin bottom-right, sized
-        to `height_frac` of the canvas height (explicit scale = predictable)."""
+    def bust_avatar(self, width_frac=0.5, height_frac=0.6, margin=24):
+        """Scale both avatar loops into a fixed box pinned bottom-right, using OBS
+        bounds so we DON'T need the clip's pixel size (which is 0 before a frame
+        decodes, and never decodes for the hidden talk clip — that was making the
+        old crop-based version silently skip and leave the avatar mis-placed)."""
         try:
             W, H = self._canvas()
+            box_w, box_h = W * width_frac, H * height_frac
             for src in (self.talk_src, self.idle_src):
                 iid = self._item_id(src)
-                t = self.c.get_scene_item_transform(self.scene, iid).scene_item_transform
-                sw, sh = t.get("sourceWidth") or 0, t.get("sourceHeight") or 0
-                if not sw or not sh:
-                    continue
-                crop_t = int(sh * head_pad)
-                crop_b = int(sh * (1 - keep_top))
-                cropped_h = max(1, sh - crop_t - crop_b)
-                scale = (H * height_frac) / cropped_h
                 self.c.set_scene_item_transform(self.scene, iid, {
-                    "cropTop": crop_t, "cropBottom": crop_b,
-                    "cropLeft": 0, "cropRight": 0,
-                    "boundsType": "OBS_BOUNDS_NONE",
-                    "scaleX": scale, "scaleY": scale, "rotation": 0,
-                    "alignment": 10,                              # bottom-right anchor
+                    "cropTop": 0, "cropBottom": 0, "cropLeft": 0, "cropRight": 0,
+                    "boundsType": "OBS_BOUNDS_SCALE_INNER",   # fit inside the box, keep aspect
+                    "boundsWidth": box_w, "boundsHeight": box_h,
+                    "boundsAlignment": 10,                    # anchor the box bottom-right
+                    "alignment": 10,                          # bottom-right anchor
                     "positionX": W - margin, "positionY": H - margin,
+                    "rotation": 0,
                 })
         except Exception as e:
             print(f"[obs] bust_avatar skipped: {e}")
