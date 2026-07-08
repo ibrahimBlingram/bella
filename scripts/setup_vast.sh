@@ -43,6 +43,10 @@ pip install -r requirements.txt
 # Belt-and-braces for the exact deps this deployment relies on:
 pip install chatterbox-tts obsws-python TikTokLive google-genai pyyaml \
     python-dotenv sounddevice soundfile numpy edge-tts
+# chatterbox-tts pins torch==2.6.0; realign torchvision to match so its compiled
+# ops register. A mismatch throws "operator torchvision::nms does not exist",
+# which cascades into a transformers "Could not import LlamaModel" error.
+pip install torchvision==0.21.0
 
 echo ""
 echo "[setup_vast] DONE."
