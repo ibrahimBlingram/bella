@@ -26,9 +26,30 @@ import os
 import glob
 import platform
 import asyncio
+import re
 
 import numpy as np
 import sounddevice as sd
+
+# Stage directions the brain shouldn't emit, but sometimes does: "[laugh]",
+# "*laughs*", "(sighs)". Only Chatterbox Turbo performs them as sounds; every
+# other engine SPEAKS THE WORD on air. Strip them before they reach the voice.
+#
+# Brackets and markdown asterisks never belong in spoken copy, so those go
+# unconditionally. Parentheses DO appear in real sentences ("Prices (starting)
+# are great") — only remove those that name an actual performed sound.
+_SOUND = (r"laugh|laughs|laughing|chuckle|chuckles|chuckling|sigh|sighs|"
+          r"sighing|cough|coughs|coughing|clears throat|gasp|gasps|pause|beat")
+_STAGE_DIRECTION = re.compile(
+    r"\[[^\]]{1,20}\]"          # [laugh], [chuckle] — brackets are never spoken
+    r"|\*[^*]{1,20}\*"          # *laughs* — markdown, persona forbids it anyway
+    rf"|\((?:{_SOUND})\)",      # (sighs) but NOT (starting)
+    re.IGNORECASE,
+)
+
+
+def strip_stage_directions(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", _STAGE_DIRECTION.sub("", text)).strip()
 
 
 def _harden_env():
@@ -199,6 +220,8 @@ class ChatterboxTurboTTS:
     Zero-shot voice cloning from a 5-10s reference clip and inline paralinguistic
     tags ([laugh], [cough], [sigh], [chuckle]). PCM16 mono @ model.sr (24000).
     Not streaming: generates the whole line, then yields it once."""
+    performs_tags = True        # the only engine that renders tags as sounds
+
     def __init__(self, cfg):
         from chatterbox.tts_turbo import ChatterboxTurboTTS as _Model
         tts = cfg["tts"]
@@ -328,9 +351,16 @@ class Voice:
         queue = asyncio.Queue(maxsize=2)
         DONE = object()
 
+        # Turbo renders "[laugh]" as a laugh; everyone else would say the word.
+        clean = not getattr(engine, "performs_tags", False)
+
         async def produce():
             try:
                 async for sentence in sentences:
+                    if clean:
+                        sentence = strip_stage_directions(sentence)
+                        if not sentence:
+                            continue
                     async for pcm in engine.synth(sentence, lang):
                         await queue.put(pcm)
             finally:
