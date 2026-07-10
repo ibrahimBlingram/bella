@@ -2,8 +2,10 @@
 google-genai>=1.0.0          # Gemini SDK (from google import genai)
 
 # Voice (install the one(s) you use)
-chatterbox-tts              # Resemble AI Chatterbox (Turbo + Multilingual), MIT, CUDA only
-edge-tts>=7.0.0             # FREE Microsoft neural TTS (Arabic) — no API key
+chatterbox-tts              # OPTIONAL, GPU only: Resemble AI Chatterbox (Turbo + Multilingual), MIT, CUDA.
+                            # Skip on Mac/CPU — pulls torch. Only needed for tts.provider: chatterbox*
+edge-tts>=7.0.0             # FREE Microsoft neural TTS (English + Arabic) — no API key, no GPU
+imageio-ffmpeg              # ffmpeg binary edge-tts uses to decode mp3 -> PCM16
 cartesia>=2.0.0              # Cartesia Sonic streaming TTS (optional)
 elevenlabs>=1.0.0            # ElevenLabs Flash streaming TTS (optional, paid)
 

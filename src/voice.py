@@ -3,6 +3,8 @@ voice.py — streaming TTS with per-language routing.
 
 The primary engine is chosen by tts.provider in config.yaml:
 
+- edge             : Microsoft neural voices, English only, FREE, no key, no GPU.
+                     Cloud — needs internet. Arabic routes to its own edge voice.
 - kokoro           : local 82M model, English only, free (Mac/CPU/CUDA).
 - chatterbox       : Chatterbox Turbo (350M), English only, CUDA only. Supports
                      inline paralinguistic tags ([laugh], [cough], [sigh],
@@ -110,14 +112,17 @@ class KokoroTTS:
 
 
 class EdgeTTS:
-    """Microsoft Edge neural voices — FREE, no API key (used for Arabic). Needs
-    internet, like Gemini already does. Streams MP3 which we decode to PCM16 mono
-    @ sample_rate with the ffmpeg bundled in imageio-ffmpeg. Resilient: a network
-    blip logs and skips the line rather than crashing the stream."""
-    def __init__(self, voice_id, sample_rate):
+    """Microsoft Edge neural voices — FREE, no API key. Serves English and/or
+    Arabic; one instance speaks one voice, so Voice keeps a separate instance per
+    language. Needs internet, like Gemini already does. Streams MP3 which we
+    decode to PCM16 mono @ sample_rate with the ffmpeg bundled in imageio-ffmpeg.
+    Resilient: a network blip logs and skips the line rather than crashing the
+    stream."""
+    def __init__(self, voice_id, sample_rate, label="edge"):
         import imageio_ffmpeg
         self.voice = voice_id or "ar-SA-ZariyahNeural"
         self.sr = sample_rate
+        self.label = label
         self.ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
     def _decode(self, mp3: bytes) -> bytes:
@@ -137,7 +142,7 @@ class EdgeTTS:
                 if ch["type"] == "audio":
                     mp3 += ch["data"]
         except Exception as e:
-            print(f"[voice] Arabic (edge-tts) failed: {e}")
+            print(f"[voice] {self.label} (edge-tts) failed: {e}")
             return
         if not mp3:
             return
@@ -275,6 +280,11 @@ class Voice:
         elif provider == "chatterbox_multi":
             self.english = ChatterboxMultiTTS(cfg)     # Arabic + English, CUDA
             self.multilingual = True
+        elif provider == "edge":
+            self.english = EdgeTTS(                    # free cloud, no key, no GPU
+                cfg["tts"].get("edge_voice_id") or "en-US-AndrewNeural",
+                self.sr, label="English")
+            print(f"[voice] English via edge-tts ({self.english.voice})")
         else:
             self.english = KokoroTTS(cfg)              # local, English only
 
@@ -292,7 +302,8 @@ class Voice:
                             sample_rate=self.sr,
                         )
                     else:                                  # edge-tts: free, no key
-                        self.arabic = EdgeTTS(ar.get("voice_id"), self.sr)
+                        self.arabic = EdgeTTS(ar.get("voice_id"), self.sr,
+                                              label="Arabic")
                     print(f"[voice] Arabic enabled via {engine}")
                 except Exception as e:
                     print(f"[voice] Arabic disabled ({e}); falling back to English only.")
