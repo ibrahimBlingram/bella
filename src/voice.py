@@ -317,28 +317,53 @@ class Voice:
 
     async def say(self, sentences, lang="en", on_start=None, on_stop=None):
         engine = self._engine(lang)
+
+        # Synthesize AHEAD of playback. Non-streaming engines (edge, chatterbox)
+        # emit one blob per sentence, so a serial synth->play->synth loop leaves
+        # a synth-length silence between every sentence — ~1.5s of dead air on
+        # edge. Running synthesis in its own task lets sentence N+1 generate
+        # while N is still being written to the device. maxsize bounds the
+        # lookahead: we never run the whole answer ahead of the speaker, and we
+        # never synthesize lines a caller abandons mid-way.
+        queue = asyncio.Queue(maxsize=2)
+        DONE = object()
+
+        async def produce():
+            try:
+                async for sentence in sentences:
+                    async for pcm in engine.synth(sentence, lang):
+                        await queue.put(pcm)
+            finally:
+                await queue.put(DONE)
+
+        producer = asyncio.create_task(produce())
         started = False
         stream = None
         try:
-            async for sentence in sentences:
-                async for pcm in engine.synth(sentence, lang):
-                    if not started:
-                        # Open the output stream LAZILY — only once the first
-                        # audio is ready. Non-streaming engines (Chatterbox) take
-                        # ~30s to synthesize; opening the stream earlier just
-                        # starves the buffer and spams ALSA underruns. 'high'
-                        # latency gives a roomy buffer so playback stays smooth.
-                        started = True
-                        stream = sd.RawOutputStream(
-                            samplerate=self.sr, channels=1, dtype="int16",
-                            device=self.device, latency="high",
-                        )
-                        stream.start()
-                        self.speaking.set()
-                        if on_start:
-                            on_start()
-                    await asyncio.to_thread(stream.write, pcm)
+            while True:
+                pcm = await queue.get()
+                if pcm is DONE:
+                    break
+                if not started:
+                    # Open the output stream LAZILY — only once the first audio
+                    # is ready. Non-streaming engines (Chatterbox) take ~30s to
+                    # synthesize; opening the stream earlier just starves the
+                    # buffer and spams ALSA underruns. 'high' latency gives a
+                    # roomy buffer so playback stays smooth.
+                    started = True
+                    stream = sd.RawOutputStream(
+                        samplerate=self.sr, channels=1, dtype="int16",
+                        device=self.device, latency="high",
+                    )
+                    stream.start()
+                    self.speaking.set()
+                    if on_start:
+                        on_start()
+                await asyncio.to_thread(stream.write, pcm)
+            await producer          # re-raise anything the producer swallowed
         finally:
+            if not producer.done():
+                producer.cancel()
             if stream is not None:
                 await asyncio.to_thread(stream.stop)
                 stream.close()
