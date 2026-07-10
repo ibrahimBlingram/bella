@@ -7,16 +7,19 @@ llm:
 
 tts:
   # provider selects the PRIMARY engine:
+  #   edge              Microsoft neural voice — FREE, no key, no GPU (Mac/Linux). Arabic via edge too.
   #   chatterbox_multi  Chatterbox Multilingual V3 — Arabic + English, CUDA only (Vast.ai)
   #   chatterbox        Chatterbox Turbo — English only, CUDA only, paralinguistic tags
   #   kokoro            local 82M, English only, free (Mac/CPU) — Arabic falls to edge/elevenlabs
-  provider: chatterbox_multi
+  provider: edge
+  edge_voice_id: "en-US-AndrewNeural"   # edge-tts MALE English voice (Bello). others: en-US-BrianNeural
+                                 # (casual), en-US-GuyNeural (passion), en-US-RogerNeural (lively)
   sample_rate: 24000             # MUST be 24000 (kokoro + all chatterbox models)
-  output_device: null            # null = system default. On Vast, PulseAudio null sink routes to OBS
+  output_device: "BlackHole 2ch" # null = system default. Mac: BlackHole so OBS captures Bello's voice
   # Voice-clone reference audio (5-10s clip). Ref MUST match the language or the
   # accent bleeds through. Only the primary chatterbox engine uses these.
-  chatterbox_ref_audio: "/root/bella/voice_samples/bella_ref_en.wav"
-  chatterbox_ref_audio_ar: "/root/bella/voice_samples/bella_ref_ar.wav"
+  chatterbox_ref_audio: "/Users/ibrahim/Documents/GitHub/bella/voice_samples/bella_ref_en.wav"
+  chatterbox_ref_audio_ar: "/Users/ibrahim/Documents/GitHub/bella/voice_samples/bella_ref_ar.wav"
   chatterbox_exaggeration: 0.7   # emotion / expressiveness (0.0 flat .. 1.0 intense)
   # --- used only when provider: kokoro ---
   voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
@@ -45,24 +48,24 @@ data:
   # Full Sobha dataset — the compact index lives in knowledge/sobha_projects.md
   # (always-on); this file is retrieved per-project for complete detail
   # (every floor plan, FAQ, currency) only when Bello is on that project.
-  sobha_dataset: /root/bella/data/sobha_full_dataset.json
+  sobha_dataset: /Users/ibrahim/Documents/GitHub/bella/data/sobha_full_dataset.json
   # The 33 CURATED, ORDERED projects that have on-screen visuals. Bello walks
   # these 1->33 during idle time, promoting each while its images play in the
   # background, with a Dubai real-estate hook between projects so it never feels
   # like a dry catalog. Order + media come from media.projects_root folders.
-  sobha_featured: /root/bella/data/sobha_featured.json
+  sobha_featured: /Users/ibrahim/Documents/GitHub/bella/data/sobha_featured.json
 
 media:
   # One subfolder per project, named NN_slug (01_the_grove ...). The NN_ prefix
   # sets both the narration ORDER and which images show for that project.
   # Bundled INSIDE the repo (clips/sobha_projects) so the project is self-contained.
-  projects_root: /root/bella/clips/sobha_projects
+  projects_root: /Users/ibrahim/Documents/GitHub/bella/clips/sobha_projects
   slide_seconds: 4.5             # how long each image stays before the next
 
 obs:
   host: localhost
   port: 4455
-  password: ""                   # set to your OBS WebSocket password if you enable auth
+  password: "Dubai@2026"         # must match OBS -> Tools -> WebSocket Server Settings
   scene: "Live"
   # Make the LIVE scene match the exported reel: full-screen background, a
   # waist-up avatar bust pinned bottom-right, and a project title/price overlay
@@ -74,12 +77,12 @@ obs:
   avatar_talk_source: "AvatarTalk"
   background_source: "Background"
   avatar_idle_loops:
-    - "/root/bella/clips/avatar_idle_loops/idle.mp4"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/avatar_idle_loops/idle.mp4"
   avatar_talk_loops:
-    - "/root/bella/clips/avatar_talk_loops/talking1.mp4"
-    - "/root/bella/clips/avatar_talk_loops/talking2.mp4"
-    - "/root/bella/clips/avatar_talk_loops/talking3.mp4"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/avatar_talk_loops/talking1.mp4"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/avatar_talk_loops/talking2.mp4"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/avatar_talk_loops/talking3.mp4"
   demo_backgrounds:
-    - "/root/bella/clips/Background/B1.png"
-    - "/root/bella/clips/Background/B2.png"
-    - "/root/bella/clips/Background/B3.png"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/Background/B1.png"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/Background/B2.png"
+    - "/Users/ibrahim/Documents/GitHub/bella/clips/Background/B3.png"
