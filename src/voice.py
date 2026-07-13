@@ -244,7 +244,16 @@ class ChatterboxTurboTTS:
     """Chatterbox Turbo (350M) — English only, CUDA only, MIT-licensed.
     Zero-shot voice cloning from a 5-10s reference clip and inline paralinguistic
     tags ([laugh], [cough], [sigh], [chuckle]). PCM16 mono @ model.sr (24000).
-    Not streaming: generates the whole line, then yields it once."""
+    Not streaming: generates the whole line, then yields it once.
+
+    Turbo does NOT support `exaggeration` — it logs
+        "CFG, min_p and exaggeration are not supported by Turbo version
+         and will be ignored"
+    once per line and drops it. So we don't pass it: expressiveness in English
+    comes from the paralinguistic TAGS (which Turbo alone performs), while
+    exaggeration is what the Multilingual model uses for Arabic. The two engines
+    are expressive in different ways, and each is fed only what it understands.
+    """
     performs_tags = True        # the only engine that renders tags as sounds
 
     def __init__(self, cfg):
@@ -252,20 +261,16 @@ class ChatterboxTurboTTS:
         tts = cfg["tts"]
         self.model = _Model.from_pretrained(device="cuda")
         self.ref = _resolve_ref(tts.get("chatterbox_ref_audio"), "English")
-        self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
-        self.excited = float(tts.get("chatterbox_exaggeration_excited",
-                                     min(1.0, self.exaggeration + 0.18)))
         self.sr = getattr(self.model, "sr", 24000)
         if tts.get("sample_rate") != self.sr:
             print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
                   f"set tts.sample_rate {self.sr}.")
-        print(f"[voice] Chatterbox Turbo (English) ready on cuda "
-              f"(emotion {self.exaggeration} .. {self.excited})")
+        print("[voice] Chatterbox Turbo (English) ready on cuda "
+              "— performs [laugh]/[chuckle]/[sigh] as real sounds")
 
     def _synth_sync(self, text):
-        wav = self.model.generate(
-            text, audio_prompt_path=self.ref,
-            exaggeration=emphasis_for(text, self.exaggeration, self.excited))
+        # No exaggeration: Turbo ignores it (see class docstring).
+        wav = self.model.generate(text, audio_prompt_path=self.ref)
         return _tensor_to_pcm16(wav)
 
     async def synth(self, text: str, lang: str = "en"):
