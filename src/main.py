@@ -121,8 +121,10 @@ async def main():
     knowledge, theme_text = kb.load(ROOT, theme)
     seeds = _seeds(theme_text) or [f"why {theme} matters for creators"]
 
-    brain = Brain(cfg, persona, knowledge)
+    # Voice first: whether the English engine can PERFORM [laugh] decides whether
+    # the brain is even allowed to write it (see Brain.__init__).
     voice = Voice(cfg)
+    brain = Brain(cfg, persona, knowledge, performs_tags=voice.performs_tags)
     obs = OBS(cfg)
     topics = TopicQueue(seeds)
 

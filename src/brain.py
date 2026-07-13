@@ -53,16 +53,23 @@ def _is_retryable(e: Exception) -> bool:
 
 
 class Brain:
-    def __init__(self, cfg, persona, knowledge):
+    def __init__(self, cfg, persona, knowledge, performs_tags: bool = False):
         self.client = genai.Client()                       # reads GEMINI_API_KEY
         self.model = cfg["llm"]["model"]
         self.max_tokens = cfg["llm"]["max_output_tokens"]
         self.temperature = cfg["llm"]["temperature"]
         self.allow_grounding = cfg["llm"]["grounding"]
         self.persona = persona
+        # Only Chatterbox Turbo PERFORMS [laugh]/[chuckle]/[sigh] as real sounds;
+        # every other engine speaks the literal word. So the instruction to write
+        # them is added ONLY when the English voice can actually perform them —
+        # otherwise Bello says "laugh" out loud on the live stream.
+        # (voice.say() also strips them per-engine as a second safety net.)
+        laughter = persona.get("expressive_tags", "") if performs_tags else ""
         # System instruction = persona rules + a hard English rule + RAG knowledge.
         self.system = (
             persona["system_prompt"]
+            + (f"\n\n{laughter.strip()}" if laughter else "")
             + "\n\nLANGUAGE: Reply in the language the current prompt tells you to "
               "use. Default to English. Never mix two languages in one reply."
             + "\n\nDELIVERY: You are spoken aloud by an energetic TTS voice. Write "

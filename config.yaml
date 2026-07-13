@@ -11,9 +11,13 @@ tts:
   #   chatterbox_multi  Chatterbox Multilingual V3 — Arabic + English, CUDA only (Vast.ai)
   #   chatterbox        Chatterbox Turbo — English only, CUDA only, paralinguistic tags
   #   kokoro            local 82M, English only, free (Mac/CPU) — Arabic falls to edge/elevenlabs
-  # chatterbox_multi is CUDA-ONLY — it will NOT start on a Mac (no NVIDIA GPU).
-  # Run this on the GPU server. To work locally on a Mac, switch back to `edge`.
-  provider: chatterbox_multi
+  # chatterbox (Turbo) is the ENGLISH voice: it is the ONLY engine that performs
+  # [laugh]/[chuckle]/[sigh] as REAL SOUNDS rather than speaking the word. Arabic
+  # is served by chatterbox_multi below (tts.arabic.engine), so BOTH languages keep
+  # the same cloned voice and English also gets real laughter. Two models on the
+  # GPU — that's the cost.
+  # CUDA-ONLY: on a Mac (no NVIDIA GPU) this auto-falls back to edge-tts.
+  provider: chatterbox
   edge_voice_id: "en-US-AndrewNeural"   # edge-tts MALE English voice (Bello). others: en-US-BrianNeural
                                  # (casual), en-US-GuyNeural (passion), en-US-RogerNeural (lively)
   sample_rate: 24000             # MUST be 24000 (kokoro + all chatterbox models)
@@ -25,14 +29,23 @@ tts:
   # config works on a Mac and on /root/bella on the server. Absolute still works.
   chatterbox_ref_audio: "voice_samples/bella_ref_en.wav"
   chatterbox_ref_audio_ar: "voice_samples/bella_ref_ar.wav"
-  chatterbox_exaggeration: 0.7   # emotion / expressiveness (0.0 flat .. 1.0 intense)
+  # Emotion / expressiveness (0.0 flat .. 1.0 intense). Delivery is NOT flat: the
+  # baseline is used for ordinary lines and `_excited` for lines the brain wrote
+  # with an "!" or a wow-word, so a punchline lands harder than a price quote
+  # (see emphasis_for() in src/voice.py). Past ~0.9 Chatterbox gets shouty.
+  chatterbox_exaggeration: 0.75          # ordinary spoken lines
+  chatterbox_exaggeration_excited: 0.9   # punchlines, reactions, "!" lines
   # --- used only when provider: kokoro ---
   voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
   kokoro_lang: "a"               # 'a' US English, 'b' UK English
   model_id: "sonic-3"            # unused by kokoro; only for cartesia/elevenlabs
-  arabic:                        # Arabic reply voice — used only for English-only primaries (kokoro/chatterbox)
-    enabled: true                # FREE via edge-tts (no key). set false for English-only
-    engine: edge                 # edge = free Microsoft neural voice | elevenlabs = paid
+  arabic:                        # Arabic reply voice — used when the primary is English-only
+    enabled: true                # set false for an English-only stream
+    # chatterbox_multi = the SAME cloned voice as English (needs CUDA + an Arabic
+    #   ref clip). This is what keeps both languages sounding like one person.
+    # edge = free Microsoft neural voice (different voice) | elevenlabs = paid
+    # Falls back to edge automatically if chatterbox_multi can't load.
+    engine: chatterbox_multi
     voice_id: "ar-SA-HamedNeural"        # edge-tts MALE Saudi voice (matches am_puck)
     # other edge voices: ar-SA-ZariyahNeural (F), ar-EG-ShakirNeural (M, Egyptian),
     #                    ar-EG-SalmaNeural (F, Egyptian), ar-AE-HamdanNeural (M, UAE)

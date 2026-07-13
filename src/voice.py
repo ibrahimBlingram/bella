@@ -31,6 +31,29 @@ import re
 import numpy as np
 import sounddevice as sd
 
+# --- expressiveness -------------------------------------------------------
+# Chatterbox takes an `exaggeration` per generate() call, so delivery doesn't
+# have to be flat across a whole segment. A punchline should land harder than a
+# price quote. We read the intensity off the punctuation the brain already
+# writes: "!" = excited, "?" = curious lift, plain "." = the baseline.
+#
+# Chatterbox's usable range is ~0.3 (flat) .. ~1.0 (intense); past ~0.9 it tends
+# to get shouty and artifact-y, so `excited` is capped rather than maxed.
+_EXCITED = re.compile(
+    r"!|\b(wow|omg|whoa|insane|crazy|unreal|amazing|stunning|obsessed|no way)\b",
+    re.IGNORECASE)
+_CURIOUS = re.compile(r"\?\s*$")
+
+
+def emphasis_for(text: str, base: float, excited: float) -> float:
+    """Per-sentence exaggeration. Falls back to `base` for ordinary lines."""
+    if _EXCITED.search(text or ""):
+        return excited
+    if _CURIOUS.search(text or ""):
+        return min(excited, base + 0.08)      # a small lift, not a full punch
+    return base
+
+
 # Stage directions the brain shouldn't emit, but sometimes does: "[laugh]",
 # "*laughs*", "(sighs)". Only Chatterbox Turbo performs them as sounds; every
 # other engine SPEAKS THE WORD on air. Strip them before they reach the voice.
@@ -230,15 +253,19 @@ class ChatterboxTurboTTS:
         self.model = _Model.from_pretrained(device="cuda")
         self.ref = _resolve_ref(tts.get("chatterbox_ref_audio"), "English")
         self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
+        self.excited = float(tts.get("chatterbox_exaggeration_excited",
+                                     min(1.0, self.exaggeration + 0.18)))
         self.sr = getattr(self.model, "sr", 24000)
         if tts.get("sample_rate") != self.sr:
             print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
                   f"set tts.sample_rate {self.sr}.")
-        print(f"[voice] Chatterbox Turbo (English) ready on cuda")
+        print(f"[voice] Chatterbox Turbo (English) ready on cuda "
+              f"(emotion {self.exaggeration} .. {self.excited})")
 
     def _synth_sync(self, text):
         wav = self.model.generate(
-            text, audio_prompt_path=self.ref, exaggeration=self.exaggeration)
+            text, audio_prompt_path=self.ref,
+            exaggeration=emphasis_for(text, self.exaggeration, self.excited))
         return _tensor_to_pcm16(wav)
 
     async def synth(self, text: str, lang: str = "en"):
@@ -264,16 +291,19 @@ class ChatterboxMultiTTS:
         self.ref_ar = _resolve_ref(
             tts.get("chatterbox_ref_audio_ar"), "Arabic") or self.ref_en
         self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
+        self.excited = float(tts.get("chatterbox_exaggeration_excited",
+                                     min(1.0, self.exaggeration + 0.18)))
         self.sr = getattr(self.model, "sr", 24000)
         if tts.get("sample_rate") != self.sr:
             print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
                   f"set tts.sample_rate {self.sr}.")
-        print(f"[voice] Chatterbox Multilingual (Arabic + English) ready on cuda")
+        print(f"[voice] Chatterbox Multilingual (Arabic + English) ready on cuda "
+              f"(emotion {self.exaggeration} .. {self.excited})")
 
     def _synth_sync(self, text, lang_id, ref):
         wav = self.model.generate(
             text, language_id=lang_id, audio_prompt_path=ref,
-            exaggeration=self.exaggeration)
+            exaggeration=emphasis_for(text, self.exaggeration, self.excited))
         return _tensor_to_pcm16(wav)
 
     async def synth(self, text: str, lang: str = "en"):
@@ -332,13 +362,27 @@ class Voice:
             self.english = KokoroTTS(cfg)              # local, English only
 
         # Separate Arabic engine — only when the primary can't speak Arabic.
+        #
+        # The best combo is chatterbox (Turbo) for English + chatterbox_multi for
+        # Arabic: English gets REAL performed laughter ([laugh]/[sigh]/[chuckle],
+        # which only Turbo can do) while Arabic still gets the same cloned voice
+        # from the multilingual model. Two models on the GPU instead of one; that
+        # is the price of laughter in English and a clone in Arabic.
+        #
+        # say() picks the engine per language and decides tag-stripping per
+        # engine, so a tag can never leak into the Arabic model, which would
+        # speak it as a literal word.
         self.arabic = None
         if not self.multilingual:
             ar = cfg["tts"].get("arabic") or {}
             if ar.get("enabled"):
                 engine = (ar.get("engine") or "edge").lower()
                 try:
-                    if engine == "elevenlabs":            # paid, optional
+                    if engine in ("chatterbox_multi", "chatterbox"):
+                        if not _has_cuda():
+                            raise RuntimeError("chatterbox Arabic needs CUDA")
+                        self.arabic = ChatterboxMultiTTS(cfg)   # cloned Arabic voice
+                    elif engine == "elevenlabs":         # paid, optional
                         self.arabic = ElevenLabsTTS(
                             voice_id=ar.get("elevenlabs_voice_id") or ar["voice_id"],
                             model_id=ar.get("model_id", "eleven_flash_v2_5"),
@@ -349,8 +393,17 @@ class Voice:
                                               label="Arabic")
                     print(f"[voice] Arabic enabled via {engine}")
                 except Exception as e:
-                    print(f"[voice] Arabic disabled ({e}); falling back to English only.")
+                    print(f"[voice] Arabic via {engine} failed ({e}); "
+                          f"falling back to edge-tts.")
+                    try:
+                        self.arabic = EdgeTTS(ar.get("voice_id"), self.sr,
+                                              label="Arabic")
+                    except Exception as e2:
+                        print(f"[voice] Arabic disabled ({e2}); English only.")
         self.has_arabic = self.multilingual or self.arabic is not None
+        # True only when the ENGLISH engine can perform [laugh]/[sigh] as sounds.
+        # The brain is told to write them only when this is on.
+        self.performs_tags = bool(getattr(self.english, "performs_tags", False))
         self.speaking = asyncio.Event()
 
     def _engine(self, lang):
