@@ -25,6 +25,9 @@ from dotenv import load_dotenv
 import obsws_python as obs
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+from paths import abspath                       # noqa: E402  (needs sys.path above)
+
 load_dotenv(ROOT / ".env")
 cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
 o = cfg["obs"]
@@ -88,12 +91,41 @@ def _order(names_bottom_to_top):
             print(f"[warn] order {name} skipped: {e}")
 
 
+def _mute_avatars():
+    """The avatar clips ship with their own audio track baked in (real speech,
+    ~-26 dB). Left unmuted it plays UNDER Bella's TTS on the live stream. OBS
+    mutes are per-source, so this survives main.py rotating the talk clip."""
+    for src in (o["avatar_idle_source"], o["avatar_talk_source"]):
+        try:
+            c.set_input_mute(src, True)
+            print(f"muted: {src}")
+        except Exception as e:
+            print(f"[warn] mute {src} skipped: {e}")
+
+
+def _vertical_canvas():
+    """TikTok is portrait. A fresh OBS profile defaults to 1920x1080 landscape,
+    which would letterbox the whole stream."""
+    try:
+        v = c.get_video_settings()
+        if (v.base_width, v.base_height) == (1080, 1920):
+            print("canvas already 1080x1920")
+            return
+        c.set_video_settings(base_width=1080, base_height=1920,
+                             output_width=1080, output_height=1920)
+        print(f"canvas set: {v.base_width}x{v.base_height} -> 1080x1920 (vertical)")
+    except Exception as e:
+        print(f"[warn] canvas resize skipped: {e}")
+
+
 def main():
     _ensure_scene()
+    _vertical_canvas()
 
-    idle_clip = o["avatar_idle_loops"][0]
-    talk_clip = o["avatar_talk_loops"][0]
-    background = o["demo_backgrounds"][0]
+    # OBS is a separate process — it can only use absolute paths.
+    idle_clip = abspath(o["avatar_idle_loops"][0])
+    talk_clip = abspath(o["avatar_talk_loops"][0])
+    background = abspath(o["demo_backgrounds"][0])
 
     # Media sources (looping avatar clips). ffmpeg_source is the OBS media kind.
     # hw_decode -> decode on the GPU (NVDEC) so the CPU/llvmpipe compositor keeps
@@ -118,6 +150,9 @@ def main():
     # Chroma key both avatar clips (green screen -> transparent).
     _chroma_key(o["avatar_talk_source"])
     _chroma_key(o["avatar_idle_source"])
+
+    # Silence the avatar clips' baked-in audio (see _mute_avatars).
+    _mute_avatars()
 
     # Stack: Background (bottom) -> AvatarIdle -> AvatarTalk (top).
     _order([o["background_source"], o["avatar_idle_source"], o["avatar_talk_source"]])

@@ -10,6 +10,8 @@ import random
 
 import obsws_python as obs
 
+from paths import abspath, abspaths
+
 
 class OBS:
     def __init__(self, cfg):
@@ -19,9 +21,10 @@ class OBS:
         self.idle_src = o["avatar_idle_source"]
         self.talk_src = o["avatar_talk_source"]
         self.bg_src = o["background_source"]
-        self.idle_loops = o["avatar_idle_loops"]
-        self.talk_loops = o["avatar_talk_loops"]
-        self.demos = o["demo_backgrounds"]
+        # OBS runs as its own process: it needs ABSOLUTE paths, always.
+        self.idle_loops = abspaths(o["avatar_idle_loops"])
+        self.talk_loops = abspaths(o["avatar_talk_loops"])
+        self.demos = abspaths(o["demo_backgrounds"])
         # Load each clip ONCE so switching never reloads from disk.
         if self.idle_loops:
             self._set_media(self.idle_src, random.choice(self.idle_loops))
@@ -178,7 +181,7 @@ class OBS:
 
     def show_background(self, path: str):
         # Swap the Background image source to a specific still (one slide).
-        self._set_image(self.bg_src, path)
+        self._set_image(self.bg_src, abspath(path))
 
     def demo_background(self):
         if self.demos:

@@ -79,8 +79,9 @@ class Brain:
         ds = (cfg.get("data") or {}).get("sobha_dataset")
         if ds:
             try:
+                from paths import abspath
                 from sobha import SobhaData
-                self.retriever = SobhaData(ds)
+                self.retriever = SobhaData(abspath(ds))
             except Exception as e:
                 print(f"[brain] Sobha retrieval disabled ({e}).")
 

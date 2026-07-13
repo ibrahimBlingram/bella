@@ -27,6 +27,7 @@ from brain import Brain, is_arabic
 from featured import Featured
 from listener import Listener
 from obs_control import OBS
+from paths import abspath
 from topics import TopicQueue
 from voice import Voice
 import kb
@@ -133,8 +134,8 @@ async def main():
         obs.apply_reel_layout()
 
     m = cfg.get("media") or {}
-    featured = Featured((cfg.get("data") or {}).get("sobha_featured"),
-                        m.get("projects_root"))
+    featured = Featured(abspath((cfg.get("data") or {}).get("sobha_featured")),
+                        abspath(m.get("projects_root")))
     slideshow = Slideshow(obs, float(m.get("slide_seconds", 4.5)))
     segments = _segment_stream(featured, seeds) if featured.projects else None
     print(f"Featured projects with visuals: {len(featured.projects)}")
