@@ -205,6 +205,8 @@ def _resolve_ref(path, label):
     """Return a usable voice-clone reference path, or None if it's unset/missing.
     A missing file is fine — Chatterbox falls back to its built-in default voice,
     so you can go live before you've recorded Bella's clone refs."""
+    from paths import abspath
+    path = abspath(path)
     if path and os.path.exists(path):
         return path
     if path:
