@@ -291,11 +291,29 @@ class ChatterboxMultiTTS:
 # --------------------------------------------------------------------------
 # Voice manager (routes by language)
 # --------------------------------------------------------------------------
+def _has_cuda() -> bool:
+    """Chatterbox is CUDA-only (no CPU, no MPS). Checked before we try to load it
+    so the same config.yaml can run on the GPU server AND on a Mac."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False                # torch isn't even installed (Mac path)
+
+
 class Voice:
     def __init__(self, cfg):
         self.sr = cfg["tts"]["sample_rate"]
         self.device = cfg["tts"]["output_device"]
         provider = (cfg["tts"].get("provider") or "kokoro").lower()
+
+        # config.yaml is set for the GPU server (chatterbox_multi). On a machine
+        # with no CUDA — a Mac — fall back to edge-tts instead of crashing, so one
+        # config works in both places. The server has CUDA and uses Chatterbox.
+        if provider.startswith("chatterbox") and not _has_cuda():
+            print(f"[voice] '{provider}' needs CUDA and this machine has none — "
+                  f"falling back to edge-tts. (The GPU server will use Chatterbox.)")
+            provider = "edge"
 
         # Primary engine. chatterbox_multi is multilingual — the same model also
         # serves Arabic (routed by lang), so no separate Arabic engine is needed.
