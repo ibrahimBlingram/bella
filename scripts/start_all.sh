@@ -57,6 +57,25 @@ else
     pgrep -x obs >/dev/null && echo "  started" || { echo "  FAILED"; tail -5 /tmp/obs.log; exit 1; }
 fi
 
+# 3b. VNC, so you can actually SEE and click the OBS window on a headless box.
+#     Bound to LOOPBACK ONLY — reachable solely through an SSH tunnel, never
+#     exposed on the public internet. From your laptop:
+#         ssh -f -N -L 5901:localhost:5900 -p <port> root@<host>
+#         open vnc://localhost:5901          # macOS; any VNC client works
+#     (5901 locally because macOS already runs its own Screen Sharing on 5900.)
+step 3b "x11vnc (view OBS remotely)"
+if ! command -v x11vnc >/dev/null; then
+    echo "  x11vnc not installed — skipping (apt-get install -y x11vnc to enable)"
+elif pgrep -x x11vnc >/dev/null; then
+    echo "  already running"
+else
+    setsid x11vnc -display :99 -forever -shared -localhost -rfbport 5900 -nopw \
+        >/tmp/x11vnc.log 2>&1 </dev/null &
+    sleep 2
+    pgrep -x x11vnc >/dev/null && echo "  started (loopback :5900 — tunnel in to view)" \
+        || echo "  failed to start (non-fatal; Bello runs fine without it)"
+fi
+
 # 4. Python env (Vast keeps it at /venv/main, not a repo-local .venv).
 step 4/5 "python env"
 source /venv/main/bin/activate
