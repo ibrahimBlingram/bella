@@ -18,8 +18,13 @@ apt-get update -qq
 apt-get install -y -qq software-properties-common
 add-apt-repository -y ppa:obsproject/obs-studio || true
 apt-get update -qq
+# mesa-utils + libgl1-mesa-dri give OBS a SOFTWARE OpenGL renderer (llvmpipe).
+# Without them OBS has no usable GL on a headless compute GPU (Xvfb provides no
+# hardware GLX) and segfaults on startup. start_obs_headless.sh forces llvmpipe
+# via LIBGL_ALWAYS_SOFTWARE=1; these are the libraries that makes possible.
 apt-get install -y -qq ffmpeg xvfb obs-studio pulseaudio pulseaudio-utils espeak-ng \
-    libportaudio2 libasound2-plugins tmux git
+    libportaudio2 libasound2-plugins tmux git \
+    mesa-utils libgl1-mesa-dri libglx-mesa0 libegl1
 
 echo "[setup_vast] starting PulseAudio + null sink (OBS captures its monitor)..."
 pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
@@ -36,12 +41,20 @@ pcm.!default { type pulse }
 ctl.!default { type pulse }
 EOF
 
-echo "[setup_vast] starting virtual display :99 (1920x1080)..."
+echo "[setup_vast] starting virtual display :99..."
 if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
     Xvfb :99 -screen 0 1920x1080x24 &
     sleep 2
 fi
 export DISPLAY=:99
+# OBS composites with OpenGL. A headless compute GPU + Xvfb = no hardware GLX, so
+# force Mesa's software renderer or OBS segfaults trying to init a GL context.
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+
+echo "[setup_vast] checking OpenGL (must say llvmpipe, not an NVIDIA card)..."
+glxinfo -B 2>/dev/null | grep -iE "OpenGL renderer|OpenGL version" \
+    || echo "  [warn] glxinfo failed — OBS will likely crash. Is mesa-utils installed?"
 
 echo "[setup_vast] installing Python dependencies..."
 pip install --upgrade pip

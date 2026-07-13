@@ -104,18 +104,27 @@ def _mute_avatars():
 
 
 def _vertical_canvas():
-    """TikTok is portrait. A fresh OBS profile defaults to 1920x1080 landscape,
-    which would letterbox the whole stream."""
+    """Make sure the canvas is PORTRAIT (9:16) for TikTok — but do NOT force a
+    resolution. On Vast the OBS compositor is llvmpipe (software GL on the CPU,
+    because a headless compute GPU gives no hardware GLX), so every pixel costs
+    CPU: the Bella profile deliberately uses 720x1280 @ 20fps. Forcing 1080x1920
+    here would hand a software rasteriser 2.25x the pixels and bring back the
+    stutter that 048be83 fixed.
+
+    So: only fix the canvas if it is LANDSCAPE (a fresh OBS profile defaults to
+    1920x1080, which would letterbox the whole stream), and rotate it to portrait
+    at the same pixel budget rather than upscaling it."""
     try:
         v = c.get_video_settings()
-        if (v.base_width, v.base_height) == (1080, 1920):
-            print("canvas already 1080x1920")
+        w, h = v.base_width, v.base_height
+        if h > w:
+            print(f"canvas already portrait: {w}x{h}")
             return
-        c.set_video_settings(base_width=1080, base_height=1920,
-                             output_width=1080, output_height=1920)
-        print(f"canvas set: {v.base_width}x{v.base_height} -> 1080x1920 (vertical)")
+        c.set_video_settings(base_width=h, base_height=w,       # swap, don't scale
+                             output_width=h, output_height=w)
+        print(f"canvas rotated to portrait: {w}x{h} -> {h}x{w}")
     except Exception as e:
-        print(f"[warn] canvas resize skipped: {e}")
+        print(f"[warn] canvas check skipped: {e}")
 
 
 def main():

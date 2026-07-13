@@ -15,6 +15,25 @@
 export DISPLAY=:99
 OBS_CFG="$HOME/.config/obs-studio"
 
+# --- WHY OBS CRASHES ON A VAST.AI BOX, AND WHAT FIXES IT ---------------------
+# Vast's GPUs are headless COMPUTE cards: no display engine, and Xvfb gives no
+# hardware GLX. OBS composites with OpenGL, so on startup it finds the NVIDIA
+# libGL, tries to create a hardware GL context against a display that cannot
+# provide one, and segfaults.
+#
+# Forcing Mesa's software renderer (llvmpipe) makes OBS create a CPU GL context
+# instead of dying. This is the fix for the crash — it is not optional here.
+#
+# Note what this does NOT give up: NVENC (encode) and NVDEC (decode) do not need
+# a display and keep running ON THE GPU. Only COMPOSITING lands on the CPU, and
+# they are separate hardware blocks from the CUDA cores Chatterbox uses — so the
+# GPU stays effectively dedicated to Chatterbox either way.
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+# llvmpipe is a CPU rasteriser: every extra pixel costs CPU. Keep the canvas
+# modest (720x1280 @ 20fps, set in the profile below) or the compositor drops
+# frames — that is what commit 048be83 was fixing.
+
 # --- make sure the virtual display + audio sink are up ---
 if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
     echo "[start_obs] Xvfb :99 not running — starting it..."
@@ -58,9 +77,22 @@ SceneCollection=Bella
 SceneCollectionFile=Bella
 INI
 
-    # Profile: vertical TikTok canvas + NVENC. If NVENC is missing OBS falls back
-    # to x264 automatically (won't crash), but every card we picked has NVENC.
-    cat > "$OBS_CFG/basic/profiles/Bella/basic.ini" <<'INI'
+    # Encoder: NVENC when the box really has it, else x264. NVENC is a dedicated
+    # block on the GPU die — it does NOT compete with Chatterbox for CUDA cores,
+    # and it works on a headless card. x264 would push a 720x1280 encode onto the
+    # same CPU that is already doing all the compositing, which is how you get a
+    # stuttering avatar and dropped frames.
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+        ENCODER=jim_nvenc
+        echo "[start_obs] NVIDIA GPU detected -> NVENC encoding (GPU, off the CPU)"
+    else
+        ENCODER=x264
+        echo "[start_obs] no NVIDIA GPU -> x264 encoding (CPU)"
+    fi
+
+    # Canvas stays 720x1280 @ 20fps: the compositor is llvmpipe (CPU), so pixels
+    # are expensive. 720x1280 is still correct 9:16 vertical for TikTok.
+    cat > "$OBS_CFG/basic/profiles/Bella/basic.ini" <<INI
 [General]
 Name=Bella
 
@@ -77,7 +109,7 @@ Mode=Simple
 
 [SimpleOutput]
 VBitrate=6000
-StreamEncoder=jim_nvenc
+StreamEncoder=$ENCODER
 ABitrate=160
 
 [Audio]
