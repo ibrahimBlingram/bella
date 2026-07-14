@@ -197,15 +197,25 @@ class Brain:
                 return
 
     async def answer(self, question: str, lang: str = "en"):
-        """Async iterator of spoken sentences answering a chat comment."""
+        """Async iterator of spoken sentences answering a chat comment.
+
+        Most comments on this stream are about the properties, and a property
+        question is a LEAD — so the answer has to be specific and, above all,
+        accurate. A wrong price is worse than no price."""
         ground = self.allow_grounding and bool(_NEEDS_WEB.search(question))
         langname = "Arabic" if lang == "ar" else "English"
         prompt = (
             f'A viewer in the live chat just said: "{question}".\n'
-            f"Reply as Bello in {langname}, in 1-2 short, lively spoken sentences. "
-            f"Be specific and use real Blingram facts from your knowledge whenever "
-            f"they apply. If you genuinely don't know a fact, say the team will "
-            f"confirm — don't invent."
+            f"Reply as Bello in {langname}, in 1-2 short, lively spoken sentences.\n"
+            f"If they asked about a Sobha project, ANSWER IT — the price, the size, "
+            f"the amenities, who it suits — using ONLY the project facts you have. "
+            f"Quote prices as starting prices ('from AED ...'), never as a final "
+            f"figure.\n"
+            f"If you don't have the number they asked for, say so warmly and tell "
+            f"them the Sobha team will confirm. NEVER invent a price, a size, a "
+            f"handover date or a payment plan — a viewer might act on it.\n"
+            f"If it's not about property at all, be charming, keep it short, and "
+            f"bring it back to what's on screen."
         )
         prompt += self._retrieve(question)
         async for s in self._stream_sentences(prompt, ground):
