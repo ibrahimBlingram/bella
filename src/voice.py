@@ -416,6 +416,9 @@ class Voice:
         # The brain is told to write them only when this is on.
         self.performs_tags = bool(getattr(self.english, "performs_tags", False))
         self.speaking = asyncio.Event()
+        # Set when the audio device misbehaves; makes the next stream open
+        # re-initialise PortAudio so it stops handing out a dead device.
+        self._audio_broken = False
 
     def _engine(self, lang):
         if self.multilingual:                # one model handles every language
@@ -477,8 +480,9 @@ class Voice:
                             asyncio.to_thread(self._open_stream), timeout=_AUDIO_TIMEOUT)
                     except (asyncio.TimeoutError, Exception) as e:
                         what = "timed out" if isinstance(e, asyncio.TimeoutError) else e
+                        self._audio_broken = True     # force a re-init next time
                         print(f"[voice] audio device would not open ({what}) — "
-                              f"dropping this line, will retry on the next one")
+                              f"dropping this line, re-initialising before the next")
                         return
                     started = True
                     self.speaking.set()
@@ -490,11 +494,13 @@ class Voice:
                 except asyncio.TimeoutError:
                     # The device is wedged. Bail out of THIS line rather than hang
                     # forever holding the lock — the next line reopens the stream.
+                    self._audio_broken = True         # force a re-init next time
                     print(f"[voice] audio write blocked >{_AUDIO_TIMEOUT}s — device "
-                          f"wedged; abandoning this line and reopening next time")
+                          f"wedged; re-initialising the audio backend")
                     return
                 except Exception as e:
-                    print(f"[voice] audio write failed ({e}); abandoning this line")
+                    self._audio_broken = True
+                    print(f"[voice] audio write failed ({e}); re-initialising")
                     return
             await producer          # re-raise anything the producer swallowed
         finally:
@@ -515,6 +521,20 @@ class Voice:
                 on_stop()
 
     def _open_stream(self):
+        # PortAudio enumerates the audio devices ONCE, when it initialises. If the
+        # PulseAudio sink is destroyed and recreated underneath us, PortAudio keeps
+        # handing out a handle to the dead one — opening "works", writes block, and
+        # no amount of retrying helps. Re-initialising is the only way to make it
+        # see the new sink. We only pay that cost after a failure.
+        if self._audio_broken:
+            try:
+                sd._terminate()
+                sd._initialize()
+                print("[voice] re-initialised the audio backend "
+                      "(PortAudio was holding a dead device)")
+            except Exception as e:
+                print(f"[voice] audio re-init failed: {e}")
+            self._audio_broken = False
         s = sd.RawOutputStream(
             samplerate=self.sr, channels=1, dtype="int16",
             device=self.device, latency="high",
