@@ -36,12 +36,26 @@ if not TARGET:
 async def main():
     q = asyncio.Queue()
     listener = Listener(TARGET, q)
-    asyncio.create_task(listener.run())
+    task = asyncio.create_task(listener.run())
     print(f"Listening to @{TARGET} ... Ctrl+C to stop.")
     print("(If it says 'offline', that account simply isn't live right now.)")
-    while True:
-        kind, name, text = await q.get()
-        print(f"[{kind:7}] {name}: {text}")
+    try:
+        while True:
+            kind, name, text = await q.get()
+            print(f"[{kind:7}] {name}: {text}")
+    finally:
+        # Listener.run() retries forever by design (the stream must survive the
+        # account going off and back on air). Without cancelling it here, Ctrl-C
+        # was swallowed by its retry loop and the test could only be killed with
+        # `pkill` from another terminal.
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except KeyboardInterrupt:
+    print("\nstopped.")
