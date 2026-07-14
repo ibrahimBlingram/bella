@@ -56,11 +56,30 @@ class OBS:
             if len(self.talk_loops) > 1:
                 self._set_media(self.talk_src, random.choice(self.talk_loops))
 
-    def hide_avatar(self):
-        """Hide BOTH avatar loops — used when nobody is in the live, so only the
-        background images show. set_talking(False) restores the idle loop."""
-        self._set_visible(self.talk_src, False)
-        self._set_visible(self.idle_src, False)
+    # There is deliberately NO hide_avatar() any more.
+    #
+    # There used to be one, for a "nobody is watching, save the API bill" mode. It
+    # hid both avatar loops. It took down a live stream: you go live, nobody has
+    # joined YET so the viewer count reads 0, and Bello hides his own avatar, hides
+    # the title and stops talking — so the first person who clicks in finds a blank,
+    # dead stream and leaves. The show switched itself off exactly when it most
+    # needed to be a show.
+    #
+    # The avatar IS the product. It stays on screen for as long as Bello runs.
+    # If you are tempted to add this back: don't.
+
+    def ensure_avatar_visible(self):
+        """Belt and braces: whatever else happened, put an avatar back on screen.
+        Called on startup so a previous run that hid it can't leave a blank stream."""
+        try:
+            if not self._is_visible(self.talk_src):
+                self._set_visible(self.idle_src, True)
+        except Exception as e:
+            print(f"[obs] ensure_avatar_visible skipped: {e}")
+
+    def _is_visible(self, source):
+        item_id = self.c.get_scene_item_id(self.scene, source).scene_item_id
+        return self.c.get_scene_item_enabled(self.scene, item_id).scene_item_enabled
 
     # ------------------------------------------------------------------
     # "Reel look" — make the LIVE scene match the exported vertical reel:

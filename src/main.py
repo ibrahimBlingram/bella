@@ -173,10 +173,6 @@ async def main():
     demo_after = s["demo_after_idle"]
     qa_cd = s["qa_cooldown"]
 
-    # Only go silent after the room has been EMPTY THIS LONG. TikTok's viewer
-    # count flickers to 0 between updates; acting on a single reading made the
-    # avatar and title vanish and reappear on a live stream.
-    EMPTY_GRACE = 90.0
     # Don't greet every single joiner. On a busy stream that is all Bello would
     # ever do — each greeting resets the clock, so he never gets to narrate, and
     # viewers hear "hello ... <silence> ... hello". Batch arrivals instead.
@@ -192,12 +188,12 @@ async def main():
         "last_greet": 0.0,
         "pending_greets": [],      # names that arrived since the last greeting
         "demo_on": False,
-        # None = unknown (offline / before the first count) -> treat as present.
+        # Kept for reference/logging only. NOTHING may act on this to hide the
+        # avatar or stop Bello talking — see idle_engine().
         "viewers": None,
-        "empty_since": None,       # when the count first hit 0 (None = not empty)
-        "silent": False,
     }
     obs.set_talking(False)
+    obs.ensure_avatar_visible()   # a previous run must never leave a blank stream
     # OBS keeps whatever was last on screen. After a restart that means the PREVIOUS
     # run's title sits over the PREVIOUS run's background until the first project
     # loads — i.e. a stale name over an unrelated building, live on stream. Clear it;
@@ -218,17 +214,11 @@ async def main():
         while True:
             kind, name, text = await events.get()
 
-            if kind == "viewers":                  # presence update, not activity
-                n = name
-                state["viewers"] = n
-                if n and n > 0:
-                    state["empty_since"] = None    # someone's here -> not empty
-                elif state["empty_since"] is None:
-                    state["empty_since"] = time.time()   # start the grace clock
+            if kind == "viewers":                  # just a count; NOT a trigger
+                state["viewers"] = name
                 continue
 
             state["demo_on"] = False               # someone's here -> leave demo mode
-            state["empty_since"] = None            # a join/comment IS presence
             if state["viewers"] in (None, 0):
                 state["viewers"] = 1               # (next count event corrects it)
 
@@ -269,55 +259,21 @@ async def main():
                 line = f"welcome in {', '.join(batch[:-1])} and {batch[-1]}!"
             await speak(_one(line))
 
-    async def silent_tour():
-        """Nobody in the live: cycle every featured project's images silently,
-        with the avatar hidden. Cancelled the moment someone shows up."""
-        media = [mp for pr in featured.projects for mp in pr.media]
-        if not media:
-            return
-        i = 0
-        while True:
-            obs.show_background(media[i % len(media)])
-            i += 1
-            await asyncio.sleep(slideshow.seconds)
-
     async def idle_engine():
-        silent_task = None
+        # "Silent mode" is GONE. It used to hide the avatar and the title and stop
+        # Bello talking whenever the room read empty, to save API cost with nobody
+        # watching. It is a trap, and it took down a live stream:
+        #
+        #   You go live. Nobody has joined YET, so the viewer count is 0. After the
+        #   grace period Bello hides his own avatar, hides the title, and shuts up —
+        #   so the very first person who clicks in finds a dead, blank stream and
+        #   leaves. The show turns itself off exactly when it needs to be a show.
+        #
+        # An empty room is not a reason to stop performing; it is the reason TO
+        # perform. Bello now always shows and always talks. Nothing in this file may
+        # hide the avatar again.
         while True:
             await asyncio.sleep(2)
-
-            # PRESENCE, with hysteresis. TikTok's viewer count drops to 0 between
-            # updates even with people watching; the old code acted on a single
-            # reading, so the avatar and title kept vanishing mid-stream. Only go
-            # silent once the room has read EMPTY continuously for EMPTY_GRACE.
-            empty_since = state["empty_since"]
-            room_empty = (empty_since is not None
-                          and (time.time() - empty_since) >= EMPTY_GRACE)
-
-            if room_empty:
-                if voice.speaking.is_set():
-                    continue                       # let any in-flight line finish
-                if not state["silent"]:
-                    await slideshow.stop()
-                    slideshow.current = None
-                    obs.hide_avatar()
-                    obs.hide_title()
-                    state["silent"] = True
-                    if featured.projects:
-                        silent_task = asyncio.create_task(silent_tour())
-                continue
-
-            if state["silent"]:                    # someone arrived -> resume
-                if silent_task:
-                    silent_task.cancel()
-                    try:
-                        await silent_task
-                    except asyncio.CancelledError:
-                        pass
-                    silent_task = None
-                slideshow.current = None           # force the next start() to redraw
-                obs.set_talking(False)             # restore the idle avatar loop
-                state["silent"] = False
 
             if voice.speaking.is_set():
                 continue
@@ -365,14 +321,21 @@ async def main():
         warned = False
         while True:
             await asyncio.sleep(15)
-            if state["silent"] or voice.speaking.is_set():
+            if voice.speaking.is_set():
                 warned = False
                 continue
+            # THE AVATAR MUST NEVER BE OFF SCREEN. It went missing on a live stream
+            # once and viewers saw a blank feed. Nothing in this code hides it any
+            # more, but a stale OBS scene, a crashed run, or a stray click in the
+            # OBS GUI still can — so check every 15s and put it back. Cheap, and it
+            # makes a blank stream self-healing rather than permanent.
+            obs.ensure_avatar_visible()
+
             gap = time.time() - state["last_spoke"]
             if gap > WARN_AFTER and not warned:
-                print(f"[watchdog] Bello has not spoken for {gap:.0f}s but the room "
-                      f"isn't empty. Audio device wedged, or the brain is failing. "
-                      f"Check the log above for [voice]/[brain] errors.")
+                print(f"[watchdog] Bello has not spoken for {gap:.0f}s. Audio device "
+                      f"wedged, or the brain is failing. Check the log above for "
+                      f"[voice]/[brain] errors.")
                 warned = True
             elif gap <= WARN_AFTER:
                 warned = False
