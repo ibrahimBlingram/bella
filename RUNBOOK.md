@@ -7,11 +7,16 @@ and to open a browser tab. Nothing about the live stream depends on your Mac.
 
 ## 1. Connect
 
-```bash
-ssh -p 27252 root@76.121.3.151
-```
+**SSH is not required.** All it does is give you a shell on the server; it is not
+part of the app. Any of these gets you the same shell, and every command below
+works identically in all three:
 
-(Or use the **Jupyter terminal** from the Vast dashboard — same thing, no SSH needed.)
+1. **Jupyter terminal** — open the instance on the Vast dashboard, open a
+   terminal in the browser. Nothing to install, no keys, no SSH.
+2. **SSH from your laptop** — `ssh -p 27252 root@76.121.3.151`
+   (`-p 27252` = port, since Vast doesn't use the default 22; `root` = user;
+   `76.121.3.151` = the server.)
+3. Vast's web terminal in the instance portal.
 
 Everything below assumes:
 
@@ -176,7 +181,106 @@ Normal. A Vast **stop/start** keeps all your *files* but kills every *process*.
 
 ---
 
-## 6. Costs — don't forget these
+## 6. Running it by hand (no scripts)
+
+`start_all.sh` is only a wrapper around these. Run them yourself to understand —
+or debug — each piece. Each step has its own silent failure mode, noted below.
+
+```bash
+cd /workspace/bella
+export DISPLAY=:99
+export LIBGL_ALWAYS_SOFTWARE=1        # OBS: software GL, or it segfaults
+
+# 1. Fake screen. OBS is a GUI app and won't launch without a display, even
+#    though nobody is looking at it.        skip this -> OBS won't start
+Xvfb :99 -screen 0 1920x1080x24 &
+
+# 2. Fake sound card. The server has NO audio hardware. Chatterbox "plays" into
+#    this sink and OBS records from it.     skip this -> the stream is SILENT
+pulseaudio --start --exit-idle-time=-1
+pactl load-module module-null-sink sink_name=bella_audio
+pactl set-default-sink bella_audio
+
+# 3. OBS. Loads the saved scene, opens its WebSocket on :4455 for Python.
+obs --minimize-to-tray --disable-shutdown-check --profile Bella --collection Bella &
+sleep 8
+
+# 4. The Python env holding torch + Chatterbox.
+#                                           wrong env -> no CUDA -> no voice
+source /venv/main/bin/activate
+
+# 5. Bello.
+python -u src/main.py
+```
+
+**What `main.py` does on startup:** reads `config.yaml` / `persona.yaml` /
+`knowledge/` → loads BOTH Chatterbox models onto the GPU (~60 s, ~3 GB VRAM) →
+connects to Gemini → connects to OBS over the WebSocket → connects to TikTok
+chat. Then three loops run forever: one reads chat, one answers comments, one
+narrates projects while chat is quiet.
+
+**Why OBS is viewed in a browser.** The server has no monitor, so each layer
+solves the next problem:
+
+```
+   your browser
+        │  http://localhost:8081        <- corporate firewalls can't block localhost
+   SSH tunnel
+        │
+     noVNC          turns a VNC stream into a web page
+        │
+    x11vnc          reads the fake screen, serves it as VNC
+        │
+   Xvfb :99         the fake screen, existing only in memory
+        │
+      OBS           thinks it has a real monitor
+```
+
+---
+
+## 7. Moving load between GPU and CPU
+
+**What runs where right now:**
+
+| | Runs on | Why |
+| --- | --- | --- |
+| Chatterbox TTS | **GPU** (CUDA cores, ~3 of 12 GB) | It is CUDA-only; it cannot run on CPU at all |
+| Video **encoding** | **GPU** (NVENC) | Dedicated chip block; doesn't need a display; doesn't compete with Chatterbox |
+| Video **decoding** | **GPU** (NVDEC) | Same |
+| **OBS compositing** | **CPU** (llvmpipe) | ← **the bottleneck** |
+
+**The thing you cannot change:** compositing cannot be moved to the GPU. Vast's
+card is a *compute* GPU with no display engine, so OBS gets no hardware OpenGL and
+composites in software on the CPU. That is a property of the hardware, not a
+setting.
+
+Because compositing is stuck on the CPU, the strategy is the opposite of what you
+might expect: **push everything else ONTO the GPU**, to leave the CPU free for the
+one job only it can do. Forcing OBS "onto the CPU" makes things *worse* — you'd
+add a software encode on top of the software compositing.
+
+**The levers, biggest first:**
+
+| Lever | Where | Effect |
+| --- | --- | --- |
+| **Canvas + FPS** | OBS → Settings → Video | The big one. 1080x1920@30 → **720x1280@20** = **3.4x less CPU work**. Looks the same on a phone. |
+| **Encoder** | OBS → Settings → Output | `NVENC` = GPU (**use this**). `x264` = CPU (avoid — piles onto the bottleneck). |
+| **Hardware decode** | source → properties | On = GPU decodes the avatar clips. Keep on. |
+| **One TTS model** | `config.yaml` → `tts.provider` | `chatterbox_multi` alone instead of Turbo+Multi: halves VRAM, **but you lose the real [laugh] sounds**. Only worth it if VRAM runs out. |
+
+**Measured on this box** at 1080x1920@30 with NVENC: **~45% CPU, 0 dropped
+frames.** There is headroom. If frames ever start dropping, **lower the canvas
+first** — it dwarfs every other lever.
+
+```bash
+bash scripts/stream.sh status     # dropped-frame % lives here
+nvidia-smi                        # GPU + VRAM use
+top                               # CPU use
+```
+
+---
+
+## 8. Costs — don't forget these
 
 - The instance bills **~$0.089/hr (~$64/month)** whenever it is *running*, even
   when Bello is idle and not streaming. **Stop the instance** on the Vast
