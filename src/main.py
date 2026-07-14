@@ -198,6 +198,11 @@ async def main():
         "silent": False,
     }
     obs.set_talking(False)
+    # OBS keeps whatever was last on screen. After a restart that means the PREVIOUS
+    # run's title sits over the PREVIOUS run's background until the first project
+    # loads — i.e. a stale name over an unrelated building, live on stream. Clear it;
+    # the first slideshow.start() will set the real one.
+    obs.hide_title()
 
     async def speak(sentences, lang="en"):
         async with speak_lock:
