@@ -48,13 +48,29 @@ pactl list short sinks 2>/dev/null | grep -q bella_audio \
 # 3. OBS. The scene, sources and stream settings persist in ~/.config/obs-studio,
 #    so this comes back exactly as it was — no need to rebuild the scene.
 step 3/5 "OBS (headless, WebSocket :4455)"
-if pgrep -x obs >/dev/null; then
+if pgrep -x obs >/dev/null && (exec 3<>/dev/tcp/localhost/4455) 2>/dev/null; then
     echo "  already running"
 else
-    obs --minimize-to-tray --disable-shutdown-check \
-        --profile Bella --collection Bella >/tmp/obs.log 2>&1 &
-    sleep 8
-    pgrep -x obs >/dev/null && echo "  started" || { echo "  FAILED"; tail -5 /tmp/obs.log; exit 1; }
+    pkill -9 -x obs 2>/dev/null && sleep 2   # a half-dead OBS holds the port
+    # OBS writes a run_* marker into .sentinel on start and deletes it on a CLEAN
+    # exit. We always stop OBS with pkill, which is not clean — so the markers pile
+    # up, OBS decides it crashed, and blocks on a "run in safe mode?" dialog that
+    # nobody can click on a headless box. The process sits there alive with the
+    # WebSocket never opening. Clearing the markers is what actually fixes it;
+    # --disable-shutdown-check alone does not.
+    rm -rf "$HOME/.config/obs-studio/.sentinel"
+    setsid obs --minimize-to-tray --disable-shutdown-check --disable-missing-files-check \
+        --profile Bella --collection Bella >/tmp/obs.log 2>&1 </dev/null &
+    # Wait for the WEBSOCKET, not just the process — a hung OBS is still "running".
+    for i in $(seq 1 20); do
+        sleep 2
+        if (exec 3<>/dev/tcp/localhost/4455) 2>/dev/null; then
+            echo "  started (websocket up after $((i*2))s)"; break
+        fi
+    done
+    if ! (exec 3<>/dev/tcp/localhost/4455) 2>/dev/null; then
+        echo "  FAILED — process up but websocket never opened:"; tail -5 /tmp/obs.log; exit 1
+    fi
 fi
 
 # 3b. VNC, so you can actually SEE and click the OBS window on a headless box.
