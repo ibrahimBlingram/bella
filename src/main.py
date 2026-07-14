@@ -288,6 +288,35 @@ async def main():
                 line = f"welcome in {', '.join(batch[:-1])} and {batch[-1]}!"
             await speak(_one(line))
 
+    # ---- segment prefetch -------------------------------------------------
+    # Ask the brain for the NEXT segment while Bello is still speaking the current
+    # one, so its words are ready the instant he stops. This is what removes the
+    # ~10s of dead air viewers heard between properties.
+    prefetch: dict = {"task": None}
+
+    async def _write_segment():
+        kind, payload = next(segments)
+        if kind == "project":
+            gen = brain.narrate_project(payload.name, payload.facts, topics.covered)
+        else:
+            gen = brain.narrate(payload, topics.covered)
+        # Drain the brain's stream to a list HERE, off the critical path.
+        return kind, payload, [s async for s in gen]
+
+    def _start_prefetch():
+        if segments is not None and prefetch["task"] is None:
+            prefetch["task"] = asyncio.create_task(_write_segment())
+
+    async def _take_prefetched():
+        _start_prefetch()                    # first call: nothing pending yet
+        task = prefetch["task"]
+        prefetch["task"] = None
+        return await task
+
+    async def _from_list(sentences):
+        for s in sentences:
+            yield s
+
     async def idle_engine():
         # "Silent mode" is GONE. It used to hide the avatar and the title and stop
         # Bello talking whenever the room read empty, to save API cost with nobody
@@ -318,16 +347,21 @@ async def main():
                 # then a Dubai real-estate hook, then the next project, ...
                 if quiet < idle_after:
                     continue
-                kind, payload = next(segments)
+                # The next segment's WORDS are already written — prefetched while he
+                # was still speaking the last one. Without this, viewers sat through
+                # ~10s of dead air between properties: the idle timer had to expire
+                # BEFORE the brain was even asked, then they waited on the LLM (~1.4s)
+                # and on the voice model (~1s) with nothing on the audio.
+                kind, payload, sentences = await _take_prefetched()
+                _start_prefetch()               # write the NEXT one while he speaks
                 if kind == "project":
                     # Background AND title set together — they cannot desync.
                     await slideshow.start(payload, payload.name, _price_of(payload))
-                    await speak(brain.narrate_project(
-                        payload.name, payload.facts, topics.covered))
+                    await speak(_from_list(sentences))
                     topics.mark(payload.name)
                 else:
-                    obs.hide_title()                # Dubai hook, not a project
-                    await speak(brain.narrate(payload, topics.covered))
+                    obs.hide_title()            # Dubai hook, not a project
+                    await speak(_from_list(sentences))
                     topics.mark(payload)
                 continue
 
