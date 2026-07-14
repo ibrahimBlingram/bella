@@ -1,11 +1,18 @@
 """
 STAGE 4 — Listener only. Tests: TikTokLive + EulerStream.
-Point it at ANY account that is currently LIVE (doesn't have to be yours).
-Prints join/comment events. No audio, no OBS. Run: python test_listener.py
+Prints join/comment events. No audio, no OBS.
 
-If TikTokLive errors on signing, add your free EulerStream API key per their docs.
+By default it listens to TIKTOK_USERNAME from .env — the same account main.py
+uses. That account must be LIVE RIGHT NOW, or TikTok just reports it offline and
+the listener retries forever (which is correct behaviour, not a bug).
+
+To watch someone else's live instead, pass a handle:
+
+    python test_listener.py                    # TIKTOK_USERNAME from .env
+    python test_listener.py someoneelse        # any account that is live now
 """
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +24,13 @@ load_dotenv()
 
 from listener import Listener  # noqa: E402
 
-TARGET = "REPLACE_WITH_A_CURRENTLY_LIVE_USERNAME"  # no leading @
+# CLI arg wins; otherwise the same env var main.py reads. Never a placeholder —
+# a hardcoded one used to send this test at a username that does not exist.
+TARGET = (sys.argv[1] if len(sys.argv) > 1
+          else os.environ.get("TIKTOK_USERNAME", "")).lstrip("@")
+
+if not TARGET:
+    sys.exit("No target. Set TIKTOK_USERNAME in .env, or: python test_listener.py <handle>")
 
 
 async def main():
@@ -25,6 +38,7 @@ async def main():
     listener = Listener(TARGET, q)
     asyncio.create_task(listener.run())
     print(f"Listening to @{TARGET} ... Ctrl+C to stop.")
+    print("(If it says 'offline', that account simply isn't live right now.)")
     while True:
         kind, name, text = await q.get()
         print(f"[{kind:7}] {name}: {text}")
