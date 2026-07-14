@@ -355,9 +355,31 @@ async def main():
                 await speak(brain.narrate(topic, topics.covered))
                 topics.mark(topic)
 
+    async def watchdog():
+        """Bello going mute is the one failure nobody notices until viewers do — it
+        looks identical to him simply having nothing to say. He once wedged on a
+        dead audio device and stayed silent for the rest of the stream without a
+        single line in the log. So: if he has not spoken in a long time while the
+        room is NOT empty, say so loudly."""
+        WARN_AFTER = 60.0
+        warned = False
+        while True:
+            await asyncio.sleep(15)
+            if state["silent"] or voice.speaking.is_set():
+                warned = False
+                continue
+            gap = time.time() - state["last_spoke"]
+            if gap > WARN_AFTER and not warned:
+                print(f"[watchdog] Bello has not spoken for {gap:.0f}s but the room "
+                      f"isn't empty. Audio device wedged, or the brain is failing. "
+                      f"Check the log above for [voice]/[brain] errors.")
+                warned = True
+            elif gap <= WARN_AFTER:
+                warned = False
+
     print(f"Bello LIVE | theme={theme} | listening to {username}")
     await asyncio.gather(listener.run(), handle_events(),
-                         greet_engine(), idle_engine())
+                         greet_engine(), idle_engine(), watchdog())
 
 
 if __name__ == "__main__":

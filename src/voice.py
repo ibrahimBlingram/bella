@@ -44,6 +44,12 @@ _EXCITED = re.compile(
     re.IGNORECASE)
 _CURIOUS = re.compile(r"\?\s*$")
 
+# Longest we will wait on the audio device before deciding it is wedged. A single
+# spoken line is a few seconds; PortAudio blocking for 20s means the device is gone,
+# not busy. Nothing here should ever hang forever — a 24/7 stream that goes silently
+# mute is worse than one that speaks a bad line.
+_AUDIO_TIMEOUT = 20.0
+
 
 def emphasis_for(text: str, base: float, excited: float) -> float:
     """Per-sentence exaggeration. Falls back to `base` for ordinary lines."""
@@ -454,27 +460,64 @@ class Voice:
                     break
                 if not started:
                     # Open the output stream LAZILY — only once the first audio
-                    # is ready. Non-streaming engines (Chatterbox) take ~30s to
+                    # is ready. Non-streaming engines (Chatterbox) take ~1s to
                     # synthesize; opening the stream earlier just starves the
                     # buffer and spams ALSA underruns. 'high' latency gives a
                     # roomy buffer so playback stays smooth.
+                    #
+                    # Both the OPEN and the WRITES are guarded. If the audio device
+                    # goes away underneath us — the PulseAudio sink is recreated, a
+                    # container hiccup, anything — PortAudio does not raise: it
+                    # BLOCKS. That silently wedged the whole stream once: the write
+                    # never returned, so speak() never released the speak-lock, and
+                    # Bello went mute for good with not one line in the log. He must
+                    # never again go quiet without saying why.
+                    try:
+                        stream = await asyncio.wait_for(
+                            asyncio.to_thread(self._open_stream), timeout=_AUDIO_TIMEOUT)
+                    except (asyncio.TimeoutError, Exception) as e:
+                        what = "timed out" if isinstance(e, asyncio.TimeoutError) else e
+                        print(f"[voice] audio device would not open ({what}) — "
+                              f"dropping this line, will retry on the next one")
+                        return
                     started = True
-                    stream = sd.RawOutputStream(
-                        samplerate=self.sr, channels=1, dtype="int16",
-                        device=self.device, latency="high",
-                    )
-                    stream.start()
                     self.speaking.set()
                     if on_start:
                         on_start()
-                await asyncio.to_thread(stream.write, pcm)
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(stream.write, pcm), timeout=_AUDIO_TIMEOUT)
+                except asyncio.TimeoutError:
+                    # The device is wedged. Bail out of THIS line rather than hang
+                    # forever holding the lock — the next line reopens the stream.
+                    print(f"[voice] audio write blocked >{_AUDIO_TIMEOUT}s — device "
+                          f"wedged; abandoning this line and reopening next time")
+                    return
+                except Exception as e:
+                    print(f"[voice] audio write failed ({e}); abandoning this line")
+                    return
             await producer          # re-raise anything the producer swallowed
         finally:
             if not producer.done():
                 producer.cancel()
             if stream is not None:
-                await asyncio.to_thread(stream.stop)
-                stream.close()
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(stream.stop), timeout=_AUDIO_TIMEOUT)
+                except Exception:
+                    pass            # a wedged device can hang stop() too
+                try:
+                    stream.close()
+                except Exception:
+                    pass
             self.speaking.clear()
             if started and on_stop:
                 on_stop()
+
+    def _open_stream(self):
+        s = sd.RawOutputStream(
+            samplerate=self.sr, channels=1, dtype="int16",
+            device=self.device, latency="high",
+        )
+        s.start()
+        return s
