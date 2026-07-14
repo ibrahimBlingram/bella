@@ -1,5 +1,6 @@
 # Brain
-google-genai>=1.0.0          # Gemini SDK (from google import genai)
+groq>=0.11.0                 # Groq SDK — the DEFAULT brain (llm.provider: groq)
+google-genai>=1.0.0          # Gemini SDK — only if llm.provider: gemini
 
 # Voice (install the one(s) you use)
 chatterbox-tts              # OPTIONAL, GPU only: Resemble AI Chatterbox (Turbo + Multilingual), MIT, CUDA.

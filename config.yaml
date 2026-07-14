@@ -1,7 +1,14 @@
 llm:
-  provider: gemini
-  model: gemini-2.5-flash        # start cheap+fast; bump to a newer flash for more "smarts"
-  grounding: false               # KEEP OFF by default. Only flips per-question for real current-events.
+  # groq   — Groq's hosted Llama. FAST and cheap: ~0.2s to first token (Gemini is
+  #          ~1s), which matters when a viewer is waiting for a reply. Needs
+  #          GROQ_API_KEY. Good English + Arabic.
+  # gemini — Google Gemini Flash. Needs GEMINI_API_KEY *with billing enabled*: the
+  #          free tier is 20 requests/DAY, which a live stream burns in minutes.
+  provider: groq
+  model: llama-3.3-70b-versatile
+  # Other Groq models: llama-3.1-8b-instant (faster, but its Arabic is poor),
+  #   qwen/qwen3-32b, openai/gpt-oss-120b. For gemini: gemini-2.5-flash.
+  grounding: false               # Gemini ONLY (web search). Ignored on groq.
   max_output_tokens: 120         # short, spoken answers
   temperature: 0.9               # variety -> never-repeating narration
 

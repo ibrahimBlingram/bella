@@ -1,19 +1,28 @@
 """
-brain.py — the AI. Gemini Flash, streaming, RAG context, grounding off by default.
+brain.py — the AI. Streaming, RAG context, and a provider switch.
 
 Streams tokens and re-chunks them into whole SENTENCES so the TTS can start
 speaking sentence 1 while the model is still writing sentence 2.
 
-Hardened for a 24/7 stream:
-  - ALWAYS answers in English (Kokoro only does English well).
-  - A transient Gemini error (503 high-demand, 429, etc.) RETRIES instead of
-    crashing; if it still fails it speaks a short filler and moves on.
+Two providers, chosen by `llm.provider` in config.yaml:
+
+  groq    (default) — Groq's hosted Llama. Fast and cheap: ~0.2s to first token
+                      vs ~1s for Gemini, which matters when a viewer is waiting
+                      for a reply. Speaks Arabic and English.
+  gemini            — Google Gemini Flash. The original. Its free tier is 20
+                      requests/DAY, which a live stream exhausts in minutes, so
+                      it needs billing enabled to be usable at all.
+
+Only Gemini can do grounded web search (`llm.grounding`); on Groq that setting is
+ignored, since Groq has no search tool. Everything else — the sentence streaming,
+the retry policy, the RAG retrieval — is shared.
+
+Hardened for a 24/7 stream: a transient error (429 rate limit, 5xx) RETRIES
+instead of crashing; if it still fails, Bello speaks a short filler and moves on.
 """
 import asyncio
+import os
 import re
-
-from google import genai
-from google.genai import types
 
 _SENT_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -54,12 +63,27 @@ def _is_retryable(e: Exception) -> bool:
 
 class Brain:
     def __init__(self, cfg, persona, knowledge, performs_tags: bool = False):
-        self.client = genai.Client()                       # reads GEMINI_API_KEY
-        self.model = cfg["llm"]["model"]
-        self.max_tokens = cfg["llm"]["max_output_tokens"]
-        self.temperature = cfg["llm"]["temperature"]
-        self.allow_grounding = cfg["llm"]["grounding"]
+        llm = cfg["llm"]
+        self.provider = (llm.get("provider") or "groq").lower()
+        self.model = llm["model"]
+        self.max_tokens = llm["max_output_tokens"]
+        self.temperature = llm["temperature"]
+        # Grounded web search is a Gemini-only tool. Groq has no search, so the
+        # setting is ignored there rather than silently pretending to work.
+        self.allow_grounding = bool(llm.get("grounding")) and self.provider == "gemini"
         self.persona = persona
+
+        if self.provider == "groq":
+            from groq import Groq
+            if not os.environ.get("GROQ_API_KEY"):
+                raise RuntimeError("GROQ_API_KEY not set in .env")
+            self.client = Groq()                   # reads GROQ_API_KEY
+        elif self.provider == "gemini":
+            from google import genai
+            self.client = genai.Client()           # reads GEMINI_API_KEY
+        else:
+            raise ValueError(f"llm.provider must be 'groq' or 'gemini', got {self.provider!r}")
+        print(f"[brain] {self.provider} / {self.model}")
         # Only Chatterbox Turbo PERFORMS [laugh]/[chuckle]/[sigh] as real sounds;
         # every other engine speaks the literal word. So the instruction to write
         # them is added ONLY when the English voice can actually perform them —
@@ -101,9 +125,11 @@ class Brain:
         return ("\n\n=== FULL PROJECT DATA (use these EXACT facts; do not invent "
                 "beyond them) ===\n" + detail)
 
-    def _gen_config(self, ground: bool):
+    def _gemini_stream(self, prompt: str, ground: bool):
+        """Blocking generator of raw text chunks from Gemini."""
+        from google.genai import types
         tools = [types.Tool(google_search=types.GoogleSearch())] if ground else None
-        return types.GenerateContentConfig(
+        cfg = types.GenerateContentConfig(
             system_instruction=self.system,
             max_output_tokens=self.max_tokens,
             temperature=self.temperature,
@@ -113,6 +139,32 @@ class Brain:
             # tokens go to the spoken answer.
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
+        for chunk in self.client.models.generate_content_stream(
+                model=self.model, contents=prompt, config=cfg):
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
+
+    def _groq_stream(self, prompt: str, ground: bool):
+        """Blocking generator of raw text chunks from Groq (OpenAI-shaped API).
+        `ground` is ignored: Groq has no web-search tool."""
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": self.system},
+                      {"role": "user", "content": prompt}],
+            max_completion_tokens=self.max_tokens,
+            temperature=self.temperature,
+            stream=True,
+        )
+        for chunk in stream:
+            # delta.content is None on the opening/closing chunks — skip, don't crash.
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+
+    def _tokens(self, prompt: str, ground: bool):
+        return (self._groq_stream if self.provider == "groq"
+                else self._gemini_stream)(prompt, ground)
 
     async def _stream_sentences(self, prompt: str, ground: bool):
         """Yield whole sentences. Retries transient failures; never raises up to caller."""
@@ -120,13 +172,7 @@ class Brain:
             buf = ""
             yielded_any = False
             try:
-                sync_stream = self.client.models.generate_content_stream(
-                    model=self.model, contents=prompt, config=self._gen_config(ground)
-                )
-                async for chunk in _aiter(sync_stream):
-                    text = getattr(chunk, "text", None)
-                    if not text:
-                        continue
+                async for text in _aiter(self._tokens(prompt, ground)):
                     buf += text
                     parts = _SENT_END.split(buf)
                     if len(parts) > 1:
