@@ -47,6 +47,7 @@ pulseaudio --check 2>/dev/null || pulseaudio --start --exit-idle-time=-1 2>/dev/
 sleep 1
 pactl list short sinks 2>/dev/null | grep -q bella_audio \
     || pactl load-module module-null-sink sink_name=bella_audio \
+         rate=48000 channels=2 format=s16le \
          sink_properties=device.description=BellaAudio >/dev/null 2>&1
 pactl set-default-sink bella_audio >/dev/null 2>&1
 pactl list short sinks 2>/dev/null | grep -q bella_audio \
