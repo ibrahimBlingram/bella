@@ -331,7 +331,9 @@ async def main():
         # perform. Bello now always shows and always talks. Nothing in this file may
         # hide the avatar again.
         while True:
-            await asyncio.sleep(2)
+            # Poll fast. At 2s this loop was itself adding up to two seconds of
+            # silence before it even noticed Bello had stopped — pure dead air.
+            await asyncio.sleep(0.4)
 
             if voice.speaking.is_set():
                 continue

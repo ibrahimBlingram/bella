@@ -68,7 +68,7 @@ stream:
   # project. The rest is Dubai real-estate talk, which is what stops the stream
   # reading as a dry catalogue. 0.7 = 70% projects / 30% Dubai.
   project_share: 0.7
-  idle_seconds: 3                # silence for this long -> narrate next segment.
+  idle_seconds: 2                # silence for this long -> narrate next segment.
                                  # Measured from when Bello last SPOKE. The next
                                  # segment's words are PREFETCHED while he's still
                                  # talking, so this is very close to the gap a viewer
