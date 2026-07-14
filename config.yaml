@@ -70,8 +70,13 @@ stream:
                                  # so the real gap a viewer hears is this + ~3s.
                                  # 12 was leaving very long dead air on stream.
   demo_after_idle: 90            # idle this long -> swap background to full-screen app demo
-  response_jitter: [1.0, 3.5]    # human-like delay before answering (seconds)
-  qa_cooldown: 8                 # min seconds between answered questions
+  # Artificial pause before answering, meant to feel "human". REMOVED: the real
+  # pipeline already costs ~2.4s (Groq ~1.4s + Chatterbox ~1.0s), and adding 1-3.5s
+  # on top made Bello take ~4.7s to react — which reads as LAG on a live stream, not
+  # as personality. Set to something like [0.3, 1.0] if you ever want it back.
+  response_jitter: [0.0, 0.0]
+  qa_cooldown: 3                 # min seconds between answered questions. Was 8, which
+                                 # silently dropped most comments on a busy stream.
 
 data:
   # Full Sobha dataset — the compact index lives in knowledge/sobha_projects.md
