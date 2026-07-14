@@ -13,6 +13,7 @@ To watch someone else's live instead, pass a handle:
 """
 import asyncio
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -35,27 +36,40 @@ if not TARGET:
 
 async def main():
     q = asyncio.Queue()
-    listener = Listener(TARGET, q)
+    listener = Listener(TARGET, q)          # <- TikTokLive installs its own SIGINT
+                                            #    handler while building the client
+    # Take SIGINT back. TikTokLive registers a handler that swallows Ctrl-C, and
+    # Listener.run() retries forever by design (the live stream must survive the
+    # account going off and back on air) — so between them, Ctrl-C did nothing and
+    # the only way out was `pkill` from a second terminal. Registering AFTER the
+    # client is constructed means ours wins.
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:         # not supported on some platforms
+            signal.signal(sig, lambda *_: stop.set())
+
     task = asyncio.create_task(listener.run())
     print(f"Listening to @{TARGET} ... Ctrl+C to stop.")
     print("(If it says 'offline', that account simply isn't live right now.)")
-    try:
+
+    async def drain():
         while True:
             kind, name, text = await q.get()
             print(f"[{kind:7}] {name}: {text}")
-    finally:
-        # Listener.run() retries forever by design (the stream must survive the
-        # account going off and back on air). Without cancelling it here, Ctrl-C
-        # was swallowed by its retry loop and the test could only be killed with
-        # `pkill` from another terminal.
-        task.cancel()
+
+    drain_task = asyncio.create_task(drain())
+    await stop.wait()                       # <- Ctrl-C lands here
+    print("\nstopping...")
+    for t in (task, drain_task):
+        t.cancel()
         try:
-            await task
+            await t
         except asyncio.CancelledError:
             pass
+    print("stopped.")
 
 
-try:
-    asyncio.run(main())
-except KeyboardInterrupt:
-    print("\nstopped.")
+asyncio.run(main())
