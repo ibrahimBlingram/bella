@@ -64,7 +64,11 @@ stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
   language: en                   # en | ar | de | es | pt | fr
   theme: dubai_realestate        # loads knowledge/theme_<theme>.md  -> swap monthly
-  idle_seconds: 12               # no chat for this long -> narrate a topic
+  idle_seconds: 6                # silence for this long -> narrate. Measured from
+                                 # when Bello last SPOKE, not from viewer activity.
+                                 # A narration also takes ~2-3s to think + speak,
+                                 # so the real gap a viewer hears is this + ~3s.
+                                 # 12 was leaving very long dead air on stream.
   demo_after_idle: 90            # idle this long -> swap background to full-screen app demo
   response_jitter: [1.0, 3.5]    # human-like delay before answering (seconds)
   qa_cooldown: 8                 # min seconds between answered questions

@@ -49,36 +49,58 @@ def _price_of(proj) -> str:
 
 class Slideshow:
     """Rotates a project's media in the OBS background while Bello talks about
-    it. Videos (if any) play first, then the images cycle every `seconds`. The
-    background holds on the last project until the next project starts — so the
-    Dubai-fact segments in between still show Sobha visuals, never a blank."""
+    it, and owns the title card that names it.
+
+    The title lives HERE, with the background, on purpose. They used to be set
+    from two different places, and a cancelled cycle task could still write one
+    more background frame after the next project had already started — so viewers
+    saw "The Brooks — from AED 4.16 M" printed over photos of The Pinnacle. A
+    title over the wrong price is worse than no title. Owning both means they
+    cannot drift apart: every background write goes through this class, and a
+    generation counter makes a stale task's write a no-op.
+    """
 
     def __init__(self, obs, seconds: float):
         self.obs = obs
         self.seconds = seconds
         self.task: asyncio.Task | None = None
         self.current: str | None = None     # media_dir of what's showing
+        self.gen = 0                        # bumped on every start/stop
 
-    async def _cycle(self, media: list[str]):
+    async def _cycle(self, media: list[str], gen: int):
         i = 1
         while True:
             await asyncio.sleep(self.seconds)
+            if gen != self.gen:             # superseded — do not touch OBS
+                return
             self.obs.show_background(media[i % len(media)])
             i += 1
 
-    def start(self, project):
-        """Show this project's media. No-op if it's already on screen."""
+    async def start(self, project, title: str = "", price: str = ""):
+        """Show this project's media AND its title, together. No-op if already on."""
         if not project or not project.media or project.media_dir == self.current:
             return
-        self.stop()
+        await self.stop()
+        self.gen += 1
         self.current = project.media_dir
         self.obs.show_background(project.media[0])
+        if title:
+            self.obs.set_title(title, price)
+        else:
+            self.obs.hide_title()
         if len(project.media) > 1:
-            self.task = asyncio.create_task(self._cycle(project.media))
+            self.task = asyncio.create_task(self._cycle(project.media, self.gen))
 
-    def stop(self):
+    async def stop(self):
+        """Cancel the cycle AND WAIT for it. Cancellation is not instant: without
+        the await, the dying task could still push one more background."""
+        self.gen += 1                       # any in-flight write is now stale
         if self.task:
             self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
             self.task = None
 
 
@@ -151,11 +173,30 @@ async def main():
     demo_after = s["demo_after_idle"]
     qa_cd = s["qa_cooldown"]
 
+    # Only go silent after the room has been EMPTY THIS LONG. TikTok's viewer
+    # count flickers to 0 between updates; acting on a single reading made the
+    # avatar and title vanish and reappear on a live stream.
+    EMPTY_GRACE = 90.0
+    # Don't greet every single joiner. On a busy stream that is all Bello would
+    # ever do — each greeting resets the clock, so he never gets to narrate, and
+    # viewers hear "hello ... <silence> ... hello". Batch arrivals instead.
+    GREET_EVERY = 20.0
+    GREET_MAX_NAMES = 3
+
     speak_lock = asyncio.Lock()
-    # viewers: None = unknown (offline / before first count) -> treated as present
-    # so behaviour is unchanged when we can't tell. 0 = empty room -> go silent.
-    state = {"last_activity": time.time(), "last_qa": 0.0,
-             "demo_on": False, "viewers": None, "silent": False}
+    state = {
+        # When Bello last actually SPOKE. Narration keys off this, not off viewer
+        # activity — otherwise a trickle of joiners starves narration forever.
+        "last_spoke": time.time(),
+        "last_qa": 0.0,
+        "last_greet": 0.0,
+        "pending_greets": [],      # names that arrived since the last greeting
+        "demo_on": False,
+        # None = unknown (offline / before the first count) -> treat as present.
+        "viewers": None,
+        "empty_since": None,       # when the count first hit 0 (None = not empty)
+        "silent": False,
+    }
     obs.set_talking(False)
 
     async def speak(sentences, lang="en"):
@@ -165,20 +206,33 @@ async def main():
                 on_start=lambda: obs.set_talking(True),
                 on_stop=lambda: obs.set_talking(False),
             )
+        # Stamped AFTER he finishes, so the idle gap is measured from silence.
+        state["last_spoke"] = time.time()
 
     async def handle_events():
         while True:
             kind, name, text = await events.get()
+
             if kind == "viewers":                  # presence update, not activity
-                state["viewers"] = name
+                n = name
+                state["viewers"] = n
+                if n and n > 0:
+                    state["empty_since"] = None    # someone's here -> not empty
+                elif state["empty_since"] is None:
+                    state["empty_since"] = time.time()   # start the grace clock
                 continue
-            state["last_activity"] = time.time()
+
             state["demo_on"] = False               # someone's here -> leave demo mode
-            if state["viewers"] in (None, 0):      # a join/comment means presence
+            state["empty_since"] = None            # a join/comment IS presence
+            if state["viewers"] in (None, 0):
                 state["viewers"] = 1               # (next count event corrects it)
+
             if kind == "join":
-                greet = random.choice(persona["greetings"]).format(name=name)
-                await speak(_one(greet))
+                # Queue the name. A greeting is NOT emitted here — greet_engine
+                # batches them. Greeting every joiner inline meant a busy stream
+                # got nothing but greetings, one at a time, forever.
+                state["pending_greets"].append(name)
+
             elif kind == "comment":
                 if time.time() - state["last_qa"] < qa_cd:
                     continue                        # cooldown: don't answer everything
@@ -188,9 +242,27 @@ async def main():
                 # If the question is about a featured project, show it on screen.
                 asked = featured.match(text)
                 if asked:
-                    slideshow.start(asked)
-                    obs.set_title(asked.name, _price_of(asked))
+                    await slideshow.start(asked, asked.name, _price_of(asked))
                 await speak(brain.answer(text, lang), lang=lang)
+
+    async def greet_engine():
+        """Greet ARRIVALS IN BATCHES. One greeting can welcome several people, and
+        never more often than GREET_EVERY — so greetings can't crowd out the
+        narration that actually carries the stream."""
+        while True:
+            await asyncio.sleep(2)
+            names = state["pending_greets"]
+            if not names or voice.speaking.is_set():
+                continue
+            if time.time() - state["last_greet"] < GREET_EVERY:
+                continue
+            batch, state["pending_greets"] = names[:GREET_MAX_NAMES], []
+            state["last_greet"] = time.time()
+            if len(batch) == 1:
+                line = random.choice(persona["greetings"]).format(name=batch[0])
+            else:
+                line = f"welcome in {', '.join(batch[:-1])} and {batch[-1]}!"
+            await speak(_one(line))
 
     async def silent_tour():
         """Nobody in the live: cycle every featured project's images silently,
@@ -209,13 +281,19 @@ async def main():
         while True:
             await asyncio.sleep(2)
 
-            present = state["viewers"] is None or state["viewers"] > 0
-            if not present:
-                # Empty room -> silent image slideshow, avatar hidden, no talking.
+            # PRESENCE, with hysteresis. TikTok's viewer count drops to 0 between
+            # updates even with people watching; the old code acted on a single
+            # reading, so the avatar and title kept vanishing mid-stream. Only go
+            # silent once the room has read EMPTY continuously for EMPTY_GRACE.
+            empty_since = state["empty_since"]
+            room_empty = (empty_since is not None
+                          and (time.time() - empty_since) >= EMPTY_GRACE)
+
+            if room_empty:
                 if voice.speaking.is_set():
                     continue                       # let any in-flight line finish
                 if not state["silent"]:
-                    slideshow.stop()
+                    await slideshow.stop()
                     slideshow.current = None
                     obs.hide_avatar()
                     obs.hide_title()
@@ -223,27 +301,37 @@ async def main():
                     if featured.projects:
                         silent_task = asyncio.create_task(silent_tour())
                 continue
+
             if state["silent"]:                    # someone arrived -> resume
                 if silent_task:
                     silent_task.cancel()
+                    try:
+                        await silent_task
+                    except asyncio.CancelledError:
+                        pass
                     silent_task = None
-                slideshow.current = None
+                slideshow.current = None           # force the next start() to redraw
                 obs.set_talking(False)             # restore the idle avatar loop
                 state["silent"] = False
 
             if voice.speaking.is_set():
                 continue
-            quiet = time.time() - state["last_activity"]
+
+            # Narration is timed from when Bello last SPOKE — not from viewer
+            # activity. Keying it off activity meant every join reset the clock, so
+            # a steady trickle of joiners starved narration completely: viewers got
+            # a greeting, then dead air, then another greeting.
+            quiet = time.time() - state["last_spoke"]
 
             if segments is not None:
-                # Visual tour: promote a project (its images play behind her),
+                # Visual tour: promote a project (its images play behind him),
                 # then a Dubai real-estate hook, then the next project, ...
                 if quiet < idle_after:
                     continue
                 kind, payload = next(segments)
                 if kind == "project":
-                    slideshow.start(payload)        # its images fill the screen
-                    obs.set_title(payload.name, _price_of(payload))
+                    # Background AND title set together — they cannot desync.
+                    await slideshow.start(payload, payload.name, _price_of(payload))
                     await speak(brain.narrate_project(
                         payload.name, payload.facts, topics.covered))
                     topics.mark(payload.name)
@@ -251,7 +339,6 @@ async def main():
                     obs.hide_title()                # Dubai hook, not a project
                     await speak(brain.narrate(payload, topics.covered))
                     topics.mark(payload)
-                state["last_activity"] = time.time()
                 continue
 
             # Fallback (no media wired): original topic + app-demo behaviour.
@@ -262,10 +349,10 @@ async def main():
                 topic = topics.next()
                 await speak(brain.narrate(topic, topics.covered))
                 topics.mark(topic)
-                state["last_activity"] = time.time()
 
     print(f"Bello LIVE | theme={theme} | listening to {username}")
-    await asyncio.gather(listener.run(), handle_events(), idle_engine())
+    await asyncio.gather(listener.run(), handle_events(),
+                         greet_engine(), idle_engine())
 
 
 if __name__ == "__main__":
