@@ -64,6 +64,10 @@ stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
   language: en                   # en | ar | de | es | pt | fr
   theme: dubai_realestate        # loads knowledge/theme_<theme>.md  -> swap monthly
+  # This is a MARKETING channel for Sobha, so most of the airtime promotes a
+  # project. The rest is Dubai real-estate talk, which is what stops the stream
+  # reading as a dry catalogue. 0.7 = 70% projects / 30% Dubai.
+  project_share: 0.7
   idle_seconds: 6                # silence for this long -> narrate. Measured from
                                  # when Bello last SPOKE, not from viewer activity.
                                  # A narration also takes ~2-3s to think + speak,
@@ -106,6 +110,12 @@ obs:
   # that shows only while on a project. Needs OBS running to take effect; tune
   # with `python tools/obs_apply_reel_layout.py`.
   reel_layout: true
+  # The avatar clips have the generator's WATERMARK burned into the bottom of the
+  # frame (over his hand). It can't be removed from the video, so the avatar is
+  # pushed DOWN by this many pixels: the bottom band falls outside the canvas and
+  # is never rendered. Raise it until the watermark is gone; too high and you start
+  # losing his hand. Canvas is 720x1280, so ~60px is roughly a centimetre on a phone.
+  avatar_drop_px: 60
   title_source: "BellaTitle"
   avatar_idle_source: "AvatarIdle"
   avatar_talk_source: "AvatarTalk"

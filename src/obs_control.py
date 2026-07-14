@@ -2,11 +2,25 @@
 obs_control.py — drives OBS over WebSocket.
 
 Switching is INSTANT: both avatar clips are loaded ONCE at startup and then we
-only toggle visibility, so there's no reload-from-disk lag when she starts or
+only toggle visibility, so there's no reload-from-disk lag when he starts or
 stops talking. For variety, the talk clip is swapped only while it's HIDDEN
 (off-screen), so rotating clips never causes a visible delay.
+
+EVERY VISUAL CHANGE IS SENT FROM A WORKER THREAD, NEVER FROM THE EVENT LOOP.
+
+obsws-python is synchronous: each call is a blocking WebSocket round-trip. Called
+straight from async code, it freezes the whole event loop for the duration — and
+while the loop is frozen, the coroutine feeding PCM to the sound device cannot
+run, so the audio buffer runs dry and the voice AUDIBLY STUTTERS. Viewers heard
+Bello hiccup every time the slideshow changed a background image.
+
+So the mutating calls are queued to a background thread and return instantly. The
+queue preserves order, so "show talk / hide idle" can never land out of sequence.
+Reads (which only happen at startup or in the watchdog) stay direct.
 """
+import queue
 import random
+import threading
 
 import obsws_python as obs
 
@@ -25,11 +39,33 @@ class OBS:
         self.idle_loops = abspaths(o["avatar_idle_loops"])
         self.talk_loops = abspaths(o["avatar_talk_loops"])
         self.demos = abspaths(o["demo_backgrounds"])
+
+        # The worker that keeps blocking WebSocket calls off the event loop.
+        self._q: queue.Queue = queue.Queue()
+        self._worker = threading.Thread(target=self._drain, daemon=True)
+        self._worker.start()
+
         # Load each clip ONCE so switching never reloads from disk.
         if self.idle_loops:
             self._set_media(self.idle_src, random.choice(self.idle_loops))
         if self.talk_loops:
             self._set_media(self.talk_src, random.choice(self.talk_loops))
+
+    def _drain(self):
+        while True:
+            fn, args = self._q.get()
+            try:
+                fn(*args)
+            except Exception as e:
+                # A visual glitch must never take down the stream.
+                print(f"[obs] {getattr(fn, '__name__', fn)} failed: {e}")
+            finally:
+                self._q.task_done()
+
+    def _submit(self, fn, *args):
+        """Queue an OBS write. Returns IMMEDIATELY — the caller (often the audio
+        path) never waits on a network round-trip."""
+        self._q.put((fn, args))
 
     def _set_media(self, source, path):
         # Media (video) sources use "local_file".
@@ -45,6 +81,11 @@ class OBS:
         self.c.set_scene_item_enabled(self.scene, item_id, on)
 
     def set_talking(self, talking: bool):
+        # Called from the AUDIO path (voice.say's on_start/on_stop), so it must not
+        # block: queued, not sent inline.
+        self._submit(self._do_set_talking, talking)
+
+    def _do_set_talking(self, talking: bool):
         # Visibility-only toggle = instant. No file reload here.
         if talking:
             self._set_visible(self.talk_src, True)
@@ -69,13 +110,12 @@ class OBS:
     # If you are tempted to add this back: don't.
 
     def ensure_avatar_visible(self):
-        """Belt and braces: whatever else happened, put an avatar back on screen.
-        Called on startup so a previous run that hid it can't leave a blank stream."""
-        try:
-            if not self._is_visible(self.talk_src):
-                self._set_visible(self.idle_src, True)
-        except Exception as e:
-            print(f"[obs] ensure_avatar_visible skipped: {e}")
+        """Belt and braces: whatever else happened, put an avatar back on screen."""
+        self._submit(self._do_ensure_avatar_visible)
+
+    def _do_ensure_avatar_visible(self):
+        if not self._is_visible(self.talk_src) and not self._is_visible(self.idle_src):
+            self._set_visible(self.idle_src, True)
 
     def _is_visible(self, source):
         item_id = self.c.get_scene_item_id(self.scene, source).scene_item_id
@@ -110,11 +150,18 @@ class OBS:
         except Exception as e:
             print(f"[obs] cover_background skipped: {e}")
 
-    def bust_avatar(self, width_frac=0.5, height_frac=0.6, margin=24):
+    def bust_avatar(self, width_frac=0.5, height_frac=0.6, margin=24, drop_px=0):
         """Scale both avatar loops into a fixed box pinned bottom-right, using OBS
         bounds so we DON'T need the clip's pixel size (which is 0 before a frame
         decodes, and never decodes for the hidden talk clip — that was making the
-        old crop-based version silently skip and leave the avatar mis-placed)."""
+        old crop-based version silently skip and leave the avatar mis-placed).
+
+        drop_px pushes the avatar DOWN past the bottom edge, so the bottom band of
+        the source video falls outside the canvas and is never rendered. That is
+        how the generator's watermark (burned into the bottom of the clip, over his
+        hand) is removed: it isn't covered up, it's pushed off-screen entirely.
+        Tune it with obs.avatar_drop_px in config.yaml.
+        """
         try:
             W, H = self._canvas()
             box_w, box_h = W * width_frac, H * height_frac
@@ -126,7 +173,8 @@ class OBS:
                     "boundsWidth": box_w, "boundsHeight": box_h,
                     "boundsAlignment": 10,                    # anchor the box bottom-right
                     "alignment": 10,                          # bottom-right anchor
-                    "positionX": W - margin, "positionY": H - margin,
+                    "positionX": W - margin,
+                    "positionY": H - margin + drop_px,        # + = further down = more cropped off
                     "rotation": 0,
                 })
         except Exception as e:
@@ -158,24 +206,20 @@ class OBS:
 
     def set_title(self, name: str, price: str = ""):
         """Show the project title + price (only call while on a project)."""
-        src = getattr(self, "title_src", None)
-        if not src:
+        if not getattr(self, "title_src", None):
             return
-        try:
-            txt = name + (f"\nfrom {price}" if price else "")
-            self.c.set_input_settings(src, {"text": txt}, overlay=True)
-            self._set_visible(src, True)
-        except Exception as e:
-            print(f"[obs] set_title skipped: {e}")
+        self._submit(self._do_set_title, name, price)
+
+    def _do_set_title(self, name: str, price: str = ""):
+        src = self.title_src
+        txt = name + (f"\nfrom {price}" if price else "")
+        self.c.set_input_settings(src, {"text": txt}, overlay=True)
+        self._set_visible(src, True)
 
     def hide_title(self):
-        src = getattr(self, "title_src", None)
-        if not src:
+        if not getattr(self, "title_src", None):
             return
-        try:
-            self._set_visible(src, False)
-        except Exception as e:
-            print(f"[obs] hide_title skipped: {e}")
+        self._submit(self._set_visible, self.title_src, False)
 
     def _order_layers(self):
         """Stack: Background (bottom) -> avatars -> title (top). Without this a
@@ -191,10 +235,10 @@ class OBS:
         except Exception as e:
             print(f"[obs] _order_layers skipped: {e}")
 
-    def apply_reel_layout(self):
+    def apply_reel_layout(self, drop_px=0):
         """One-shot: make the live scene look like the exported reel."""
         self.cover_background()
-        self.bust_avatar()
+        self.bust_avatar(drop_px=drop_px)
         self.ensure_title()
         self._order_layers()
 
@@ -204,4 +248,4 @@ class OBS:
 
     def demo_background(self):
         if self.demos:
-            self._set_image(self.bg_src, random.choice(self.demos))
+            self._submit(self._set_image, self.bg_src, random.choice(self.demos))

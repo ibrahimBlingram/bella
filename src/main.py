@@ -104,9 +104,21 @@ class Slideshow:
             self.task = None
 
 
-def _segment_stream(featured: Featured, fact_seeds: list[str]):
-    """Infinite: project 1 -> Dubai hook -> project 2 -> Dubai hook -> ...
-    Yields ("project", Project) and ("fact", seed)."""
+def _segment_stream(featured: Featured, fact_seeds: list[str], project_share=0.7):
+    """Infinite stream of segments, weighted.
+
+    This is a MARKETING channel for Sobha, so the projects are the point — but a
+    solid hour of nothing but listings is a channel nobody watches. The Dubai
+    real-estate hooks are what stop it reading as a catalogue.
+
+    It used to strictly alternate project / fact / project / fact, i.e. a 50-50
+    split: half the airtime went to general Dubai chat rather than to Sobha.
+
+    `project_share` is the fraction of SEGMENTS that promote a project (0.7 = 70%
+    projects, 30% Dubai). Segments are emitted to keep the running ratio as close
+    to that target as possible, so it holds over any window, not just on average
+    across a full lap. Projects still go in order 1..N so the tour is coherent.
+    """
     bag: list[str] = []
 
     def next_fact() -> str:
@@ -116,11 +128,22 @@ def _segment_stream(featured: Featured, fact_seeds: list[str]):
             random.shuffle(bag)
         return bag.pop()
 
+    projects = 0
+    facts = 0
+    idx = 0
     while True:
-        for pr in featured.projects:            # sequential 1..N, then repeat
-            yield ("project", pr)
-            if fact_seeds:
-                yield ("fact", next_fact())
+        if not featured.projects:
+            return
+        # Emit whichever segment moves the running ratio TOWARD the target.
+        total = projects + facts
+        want_project = (not fact_seeds) or total == 0 or (projects / total) < project_share
+        if want_project:
+            yield ("project", featured.projects[idx % len(featured.projects)])
+            idx += 1
+            projects += 1
+        else:
+            yield ("fact", next_fact())
+            facts += 1
 
 
 def _seeds(theme_text: str):
@@ -155,19 +178,25 @@ async def main():
     o = cfg.get("obs") or {}
     if o.get("reel_layout"):
         obs.title_src = o.get("title_source", "BellaTitle")
-        obs.apply_reel_layout()
+        # avatar_drop_px pushes the avatar below the bottom edge so the generator
+        # watermark burned into the bottom of the clip is cropped off the canvas.
+        obs.apply_reel_layout(drop_px=int(o.get("avatar_drop_px", 0)))
 
     m = cfg.get("media") or {}
     featured = Featured(abspath((cfg.get("data") or {}).get("sobha_featured")),
                         abspath(m.get("projects_root")))
     slideshow = Slideshow(obs, float(m.get("slide_seconds", 4.5)))
-    segments = _segment_stream(featured, seeds) if featured.projects else None
     print(f"Featured projects with visuals: {len(featured.projects)}")
     events: asyncio.Queue = asyncio.Queue()
     username = os.environ[cfg["stream"]["username_env"]]
     listener = Listener(username, events)
 
     s = cfg["stream"]
+    # 70% of segments promote a Sobha project, 30% are Dubai real-estate hooks.
+    # This is a marketing channel — the projects are the point — but an unbroken
+    # hour of listings is a channel nobody watches.
+    segments = (_segment_stream(featured, seeds, float(s.get("project_share", 0.7)))
+                if featured.projects else None)
     jitter = s["response_jitter"]
     idle_after = s["idle_seconds"]
     demo_after = s["demo_after_idle"]
