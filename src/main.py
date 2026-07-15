@@ -301,6 +301,7 @@ async def main():
                 state["answering"] = True
                 slideshow.pause()
                 try:
+                    print(f"[comment] {name}: {text!r} -> answering")
                     lang = "ar" if (is_arabic(text) and voice.has_arabic) else "en"
                     # If it's about a specific project, put THAT one on screen (still
                     # frozen — start() shows the first image, pause() holds it).
