@@ -236,6 +236,16 @@ async def main():
     GREET_EVERY = 20.0
     GREET_MAX_NAMES = 3
 
+    # TikTok REPLAYS the recent comment backlog every time the listener reconnects,
+    # and the listener reconnects a lot (the account keeps flickering offline). So
+    # the SAME comment kept arriving over and over, and Bello answered it every
+    # time — in one live run he re-answered the same 6 comments 11x each, while
+    # genuinely new comments waited behind that backlog. That is what read as "he
+    # isn't answering / he's slow". Answer any given comment at most once per
+    # window; a real viewer re-asking the exact same words 4 min later still gets
+    # through.
+    DEDUP_WINDOW = 240.0
+
     speak_lock = asyncio.Lock()
     state = {
         # When Bello last actually SPOKE. Narration keys off this, not off viewer
@@ -252,6 +262,8 @@ async def main():
         # advance to the next project during an answer — that was the bug where the
         # background ran on to the next building while Bello was still replying.
         "answering": False,
+        # comment-key -> time it was last answered, to drop reconnect replays.
+        "answered": {},
     }
     obs.set_talking(False)
     obs.ensure_avatar_visible()   # a previous run must never leave a blank stream
@@ -290,8 +302,24 @@ async def main():
                 state["pending_greets"].append(name)
 
             elif kind == "comment":
-                if time.time() - state["last_qa"] < qa_cd:
+                now = time.time()
+                # Drop reconnect REPLAYS: same person + same words, already answered
+                # within the window -> skip. This is what stops Bello re-answering a
+                # handful of stale comments forever while new ones pile up behind them.
+                ckey = f"{name}|{(text or '').strip().lower()}"
+                answered = state["answered"]
+                if now - answered.get(ckey, 0.0) < DEDUP_WINDOW:
+                    continue
+                if now - state["last_qa"] < qa_cd:
                     continue                        # cooldown: don't answer everything
+                # Remember it now (before the await) so duplicates already queued up
+                # behind this one from the same replay burst are skipped too. Prune
+                # so the dict can't grow without bound on a long stream.
+                answered[ckey] = now
+                if len(answered) > 256:
+                    for k, t in list(answered.items()):
+                        if now - t > DEDUP_WINDOW:
+                            del answered[k]
                 if jitter[1] > 0:
                     await asyncio.sleep(random.uniform(*jitter))
                 state["last_qa"] = time.time()
