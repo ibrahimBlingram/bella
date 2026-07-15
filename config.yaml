@@ -113,10 +113,11 @@ obs:
   reel_layout: true
   # The avatar clips have the generator's WATERMARK burned into the bottom of the
   # frame (over his hand). It can't be removed from the video, so the avatar is
-  # pushed DOWN by this many pixels: the bottom band falls outside the canvas and
-  # is never rendered. Raise it until the watermark is gone; too high and you start
-  # losing his hand. Canvas is 720x1280, so ~60px is roughly a centimetre on a phone.
-  avatar_drop_px: 60
+  # pushed DOWN by this many pixels: the bottom band (with the watermark) falls
+  # outside the canvas and is never rendered. Canvas is 720x1280, so ~90px ~= 1cm
+  # on a phone. Raise until the watermark is gone; too high starts cutting his hands.
+  avatar_drop_px: 150
+  avatar_shift_x: 45             # nudge the avatar RIGHT (px). ~45 ~= 0.5cm on a phone.
   title_source: "BellaTitle"
   avatar_idle_source: "AvatarIdle"
   avatar_talk_source: "AvatarTalk"

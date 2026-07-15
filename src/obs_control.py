@@ -150,7 +150,8 @@ class OBS:
         except Exception as e:
             print(f"[obs] cover_background skipped: {e}")
 
-    def bust_avatar(self, width_frac=0.5, height_frac=0.6, margin=24, drop_px=0):
+    def bust_avatar(self, width_frac=0.5, height_frac=0.6, margin=24, drop_px=0,
+                    shift_x=0):
         """Scale both avatar loops into a fixed box pinned bottom-right, using OBS
         bounds so we DON'T need the clip's pixel size (which is 0 before a frame
         decodes, and never decodes for the hidden talk clip — that was making the
@@ -173,7 +174,7 @@ class OBS:
                     "boundsWidth": box_w, "boundsHeight": box_h,
                     "boundsAlignment": 10,                    # anchor the box bottom-right
                     "alignment": 10,                          # bottom-right anchor
-                    "positionX": W - margin,
+                    "positionX": W - margin + shift_x,        # + = further RIGHT (off the right edge)
                     "positionY": H - margin + drop_px,        # + = further down = more cropped off
                     "rotation": 0,
                 })
@@ -235,10 +236,10 @@ class OBS:
         except Exception as e:
             print(f"[obs] _order_layers skipped: {e}")
 
-    def apply_reel_layout(self, drop_px=0):
+    def apply_reel_layout(self, drop_px=0, shift_x=0):
         """One-shot: make the live scene look like the exported reel."""
         self.cover_background()
-        self.bust_avatar(drop_px=drop_px)
+        self.bust_avatar(drop_px=drop_px, shift_x=shift_x)
         self.ensure_title()
         self._order_layers()
 

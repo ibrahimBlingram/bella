@@ -221,12 +221,32 @@ class Brain:
         async for s in self._stream_sentences(prompt, ground):
             yield s
 
+    # Openers to FORCE variety on the Dubai segments. Left to itself the model
+    # begins almost every one the same way ("Dubai's real estate market is...",
+    # "Let me tell you about..."), which is what viewers heard as "the same sentence
+    # every time". A different required opening style each call breaks that.
+    _OPENERS = [
+        "Open with a genuinely surprising number or fact — no throat-clearing.",
+        "Open with a joke or a playful hot take, THEN make the point.",
+        "Open mid-thought, like you're continuing a conversation — 'okay so...'.",
+        "Open by teasing the viewer ('bet you didn't know...').",
+        "Open with a bold one-liner claim, then back it up.",
+        "Open with a 'here's the thing nobody tells you' reveal.",
+        "Open by reacting to Dubai like you still can't believe it exists.",
+        "Open with a quick 'imagine this...' scenario.",
+    ]
+
     async def narrate(self, topic: str, covered: list[str]):
-        """Async iterator of spoken sentences for an idle-time segment."""
+        """Async iterator of spoken sentences for an idle-time (Dubai) segment."""
+        # Vary the index by how much has been covered so it walks the list rather
+        # than risk repeating (Math.random is unavailable in some sandboxes anyway).
+        opener = self._OPENERS[len(covered) % len(self._OPENERS)]
         prompt = self.persona["narration_prompt"].format(
             topic=topic,
             covered="; ".join(covered[-12:]) or "(nothing yet)",
-        ) + "\nReply in English."
+        ) + f"\n{opener}\nBe genuinely funny — this is entertainment between listings, "
+        prompt += ("not a lecture. Never start the same way you did last time. "
+                   "Reply in English.")
         prompt += self._retrieve(topic)
         async for s in self._stream_sentences(prompt, ground=False):
             yield s

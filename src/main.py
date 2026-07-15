@@ -60,21 +60,37 @@ class Slideshow:
     generation counter makes a stale task's write a no-op.
     """
 
-    def __init__(self, obs, seconds: float):
+    def __init__(self, obs, seconds: float, is_speaking=None):
         self.obs = obs
         self.seconds = seconds
         self.task: asyncio.Task | None = None
         self.current: str | None = None     # media_dir of what's showing
         self.gen = 0                        # bumped on every start/stop
+        self.paused = False                 # freeze the background (comment answers)
+        # The images advance ONLY while Bello is actually speaking about the
+        # project. Between segments and while he's silent, the picture holds — which
+        # is what "the slideshow and audio must be in sync" means. Without this the
+        # images cycled on a blind wall-clock timer and drifted off what he was
+        # saying entirely.
+        self._is_speaking = is_speaking or (lambda: True)
 
     async def _cycle(self, media: list[str], gen: int):
         i = 1
         while True:
-            await asyncio.sleep(self.seconds)
+            await asyncio.sleep(0.25)
             if gen != self.gen:             # superseded — do not touch OBS
                 return
-            self.obs.show_background(media[i % len(media)])
-            i += 1
+            # Hold the frame while paused (answering a comment) or while he's not
+            # actually talking about this project. Advancing only during speech is
+            # what keeps the picture matched to the words.
+            if self.paused or not self._is_speaking():
+                continue
+            # Advance one slide every `seconds` of SPEAKING time.
+            self._elapsed = getattr(self, "_elapsed", 0.0) + 0.25
+            if self._elapsed >= self.seconds:
+                self._elapsed = 0.0
+                self.obs.show_background(media[i % len(media)])
+                i += 1
 
     async def start(self, project, title: str = "", price: str = ""):
         """Show this project's media AND its title, together. No-op if already on."""
@@ -83,6 +99,8 @@ class Slideshow:
         await self.stop()
         self.gen += 1
         self.current = project.media_dir
+        self._elapsed = 0.0
+        self.paused = False
         self.obs.show_background(project.media[0])
         if title:
             self.obs.set_title(title, price)
@@ -90,6 +108,13 @@ class Slideshow:
             self.obs.hide_title()
         if len(project.media) > 1:
             self.task = asyncio.create_task(self._cycle(project.media, self.gen))
+
+    def pause(self):
+        """Freeze the current image — used while answering a comment."""
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
 
     async def stop(self):
         """Cancel the cycle AND WAIT for it. Cancellation is not instant: without
@@ -179,13 +204,16 @@ async def main():
     if o.get("reel_layout"):
         obs.title_src = o.get("title_source", "BellaTitle")
         # avatar_drop_px pushes the avatar below the bottom edge so the generator
-        # watermark burned into the bottom of the clip is cropped off the canvas.
-        obs.apply_reel_layout(drop_px=int(o.get("avatar_drop_px", 0)))
+        # watermark burned into the bottom of the clip is cropped off the canvas;
+        # avatar_shift_x nudges it right.
+        obs.apply_reel_layout(drop_px=int(o.get("avatar_drop_px", 0)),
+                              shift_x=int(o.get("avatar_shift_x", 0)))
 
     m = cfg.get("media") or {}
     featured = Featured(abspath((cfg.get("data") or {}).get("sobha_featured")),
                         abspath(m.get("projects_root")))
-    slideshow = Slideshow(obs, float(m.get("slide_seconds", 4.5)))
+    slideshow = Slideshow(obs, float(m.get("slide_seconds", 4.5)),
+                          is_speaking=lambda: voice.speaking.is_set())
     print(f"Featured projects with visuals: {len(featured.projects)}")
     events: asyncio.Queue = asyncio.Queue()
     username = os.environ[cfg["stream"]["username_env"]]
@@ -220,6 +248,10 @@ async def main():
         # Kept for reference/logging only. NOTHING may act on this to hide the
         # avatar or stop Bello talking — see idle_engine().
         "viewers": None,
+        # True while a viewer comment is being answered. The idle tour must NOT
+        # advance to the next project during an answer — that was the bug where the
+        # background ran on to the next building while Bello was still replying.
+        "answering": False,
     }
     obs.set_talking(False)
     obs.ensure_avatar_visible()   # a previous run must never leave a blank stream
@@ -260,14 +292,26 @@ async def main():
             elif kind == "comment":
                 if time.time() - state["last_qa"] < qa_cd:
                     continue                        # cooldown: don't answer everything
-                await asyncio.sleep(random.uniform(*jitter))   # human-like delay
+                if jitter[1] > 0:
+                    await asyncio.sleep(random.uniform(*jitter))
                 state["last_qa"] = time.time()
-                lang = "ar" if (is_arabic(text) and voice.has_arabic) else "en"
-                # If the question is about a featured project, show it on screen.
-                asked = featured.match(text)
-                if asked:
-                    await slideshow.start(asked, asked.name, _price_of(asked))
-                await speak(brain.answer(text, lang), lang=lang)
+                # Claim the floor: the idle tour must not start a new project while
+                # we answer, and the background FREEZES so it can't run on to the
+                # next building mid-reply.
+                state["answering"] = True
+                slideshow.pause()
+                try:
+                    lang = "ar" if (is_arabic(text) and voice.has_arabic) else "en"
+                    # If it's about a specific project, put THAT one on screen (still
+                    # frozen — start() shows the first image, pause() holds it).
+                    asked = featured.match(text)
+                    if asked:
+                        await slideshow.start(asked, asked.name, _price_of(asked))
+                        slideshow.pause()
+                    await speak(brain.answer(text, lang), lang=lang)
+                finally:
+                    state["answering"] = False
+                    slideshow.resume()
 
     async def greet_engine():
         """Greet ARRIVALS IN BATCHES. One greeting can welcome several people, and
@@ -336,6 +380,12 @@ async def main():
             await asyncio.sleep(0.4)
 
             if voice.speaking.is_set():
+                continue
+
+            # A comment is being answered (or is about to be). Do NOT start a new
+            # project — that was the bug where the background ran on to the next
+            # building while Bello was still replying to someone.
+            if state["answering"]:
                 continue
 
             # Narration is timed from when Bello last SPOKE — not from viewer
