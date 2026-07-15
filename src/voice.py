@@ -44,20 +44,11 @@ _EXCITED = re.compile(
     re.IGNORECASE)
 _CURIOUS = re.compile(r"\?\s*$")
 
-# Longest we will wait to OPEN or STOP the audio device before deciding it is gone.
-# Nothing here should ever hang forever — a 24/7 stream that goes silently mute is
-# worse than one that speaks a bad line.
-_AUDIO_TIMEOUT = 8.0
-
-# Audio is written to the device in small CHUNKS, not one blob per sentence. A
-# whole-sentence write() only returns once its audio has DRAINED — i.e. it blocks
-# for the LENGTH of the line — so a single-shot timeout had to be huge (20s) to
-# avoid false alarms on long lines, which meant a genuinely dead device froze the
-# stream for a full 20s before recovering. Chunking decouples "how long is this
-# line" from "is the device dead": each chunk blocks ~its own duration, so a short
-# per-chunk timeout catches a wedge in a few seconds without tripping on long lines.
-_CHUNK_SECONDS = 0.4
-_WRITE_TIMEOUT = 4.0
+# Longest we will wait on the audio device before deciding it is wedged. A single
+# spoken line is a few seconds; PortAudio blocking for 20s means the device is gone,
+# not busy. Nothing here should ever hang forever — a 24/7 stream that goes silently
+# mute is worse than one that speaks a bad line.
+_AUDIO_TIMEOUT = 20.0
 
 
 def emphasis_for(text: str, base: float, excited: float) -> float:
@@ -313,8 +304,6 @@ class ChatterboxMultiTTS:
         self.exaggeration = float(tts.get("chatterbox_exaggeration", 0.7))
         self.excited = float(tts.get("chatterbox_exaggeration_excited",
                                      min(1.0, self.exaggeration + 0.18)))
-        # Pacing: lower cfg_weight = slower, more deliberate speech. Default 0.5.
-        self.cfg_weight = float(tts.get("chatterbox_cfg_weight", 0.5))
         self.sr = getattr(self.model, "sr", 24000)
         if tts.get("sample_rate") != self.sr:
             print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
@@ -325,8 +314,7 @@ class ChatterboxMultiTTS:
     def _synth_sync(self, text, lang_id, ref):
         wav = self.model.generate(
             text, language_id=lang_id, audio_prompt_path=ref,
-            exaggeration=emphasis_for(text, self.exaggeration, self.excited),
-            cfg_weight=self.cfg_weight)          # lower = slower, calmer pacing
+            exaggeration=emphasis_for(text, self.exaggeration, self.excited))
         return _tensor_to_pcm16(wav)
 
     async def synth(self, text: str, lang: str = "en"):
@@ -500,31 +488,19 @@ class Voice:
                     self.speaking.set()
                     if on_start:
                         on_start()
-                # Write in small chunks (see _CHUNK_SECONDS): a wedged device is
-                # then caught in ~_WRITE_TIMEOUT seconds instead of freezing the
-                # stream for the whole 20s a single-shot write used to allow.
-                chunk = int(self.sr * _CHUNK_SECONDS) * 2   # int16 mono: 2 bytes/sample
-                wedged = False
-                for off in range(0, len(pcm), chunk):
-                    frame = pcm[off:off + chunk]
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.to_thread(stream.write, frame),
-                            timeout=_WRITE_TIMEOUT)
-                    except asyncio.TimeoutError:
-                        # The device is wedged. Bail out of THIS line rather than
-                        # hang holding the lock — the next line reopens the stream.
-                        self._audio_broken = True     # force a re-init next time
-                        print(f"[voice] audio write blocked >{_WRITE_TIMEOUT}s — "
-                              f"device wedged; re-initialising the audio backend")
-                        wedged = True
-                        break
-                    except Exception as e:
-                        self._audio_broken = True
-                        print(f"[voice] audio write failed ({e}); re-initialising")
-                        wedged = True
-                        break
-                if wedged:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(stream.write, pcm), timeout=_AUDIO_TIMEOUT)
+                except asyncio.TimeoutError:
+                    # The device is wedged. Bail out of THIS line rather than hang
+                    # forever holding the lock — the next line reopens the stream.
+                    self._audio_broken = True         # force a re-init next time
+                    print(f"[voice] audio write blocked >{_AUDIO_TIMEOUT}s — device "
+                          f"wedged; re-initialising the audio backend")
+                    return
+                except Exception as e:
+                    self._audio_broken = True
+                    print(f"[voice] audio write failed ({e}); re-initialising")
                     return
             await producer          # re-raise anything the producer swallowed
         finally:

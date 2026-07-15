@@ -24,15 +24,7 @@ tts:
   # the same cloned voice and English also gets real laughter. Two models on the
   # GPU — that's the cost.
   # CUDA-ONLY: on a Mac (no NVIDIA GPU) this auto-falls back to edge-tts.
-  #
-  # chatterbox_multi (NOT chatterbox/Turbo) is the primary on purpose: ONE model
-  # speaks BOTH English and Arabic, each cloned from its own reference clip. That
-  # is what keeps the two languages sounding like the SAME person and removes the
-  # switch-delay you get from swapping between two different models mid-stream.
-  # (Turbo could perform a real [laugh], but it is English-only, so pairing it with
-  # a second Arabic model made English and Arabic sound like two different people
-  # and lagged on every language switch. One voice, no lag, wins here.)
-  provider: chatterbox_multi
+  provider: chatterbox
   edge_voice_id: "en-US-AndrewNeural"   # edge-tts MALE English voice (Bello). others: en-US-BrianNeural
                                  # (casual), en-US-GuyNeural (passion), en-US-RogerNeural (lively)
   sample_rate: 24000             # MUST be 24000 (kokoro + all chatterbox models)
@@ -48,16 +40,8 @@ tts:
   # baseline is used for ordinary lines and `_excited` for lines the brain wrote
   # with an "!" or a wow-word, so a punchline lands harder than a price quote
   # (see emphasis_for() in src/voice.py). Past ~0.9 Chatterbox gets shouty.
-  # KEEP THESE LOW AND CLOSE TOGETHER: high exaggeration makes the multilingual
-  # model talk FAST and drift OFF the cloned voice (that was the "why does his
-  # accent keep changing" wobble). ~0.5 tracks the reference clip most faithfully.
-  chatterbox_exaggeration: 0.5           # ordinary spoken lines
-  chatterbox_exaggeration_excited: 0.6   # punchlines, reactions, "!" lines
-  # Pacing. LOWER cfg_weight = SLOWER, more deliberate delivery; higher = quicker
-  # and clipped. Chatterbox's default is 0.5; 0.4 slows him a notch so English
-  # stops sounding rushed. Drop toward 0.3 if it's still too fast. (Turbo ignores
-  # this, but the multilingual model — which we use — honours it.)
-  chatterbox_cfg_weight: 0.4
+  chatterbox_exaggeration: 0.75          # ordinary spoken lines
+  chatterbox_exaggeration_excited: 0.9   # punchlines, reactions, "!" lines
   # --- used only when provider: kokoro ---
   voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
   kokoro_lang: "a"               # 'a' US English, 'b' UK English
