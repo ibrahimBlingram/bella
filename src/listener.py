@@ -12,6 +12,7 @@ Requirements:
     rate-limited and drops more often.
 """
 import os
+import time
 import asyncio
 
 from TikTokLive import TikTokLiveClient
@@ -31,12 +32,23 @@ if _KEY:
     WebDefaults.tiktok_sign_api_key = _KEY
 
 
+# A healthy room delivers events (viewer counts, joins, comments) every few
+# seconds — measured ~5 in 15s even with almost nobody watching. So if NOTHING
+# arrives for this long, the socket is half-open/dead: this is what happens when
+# the TikTok live is stopped and restarted — the old room dies, but connect()
+# keeps blocking on it forever, never erroring, never reconnecting, never
+# delivering another event. When that silence trips, we force a reconnect so a
+# fresh client finds the NEW room.
+_STALL_SECONDS = 45.0
+
+
 class Listener:
     def __init__(self, username: str, queue):
         if not username.startswith("@"):
             username = "@" + username          # TikTokLive wants the @handle
         self.username = username
         self.q = queue
+        self._last_rx = 0.0                     # monotonic time of last event
 
     def _make_client(self):
         """Build a FRESH client with handlers attached.
@@ -54,10 +66,12 @@ class Listener:
 
         @client.on(CommentEvent)
         async def _on_comment(e: CommentEvent):
+            self._last_rx = time.monotonic()
             await self.q.put(("comment", e.user.nickname, e.comment))
 
         @client.on(JoinEvent)
         async def _on_join(e: JoinEvent):
+            self._last_rx = time.monotonic()
             name = getattr(e.user, "nickname", None)
             if name and len(name) > 1:          # drop single-char artifacts
                 await self.q.put(("join", name, None))
@@ -69,6 +83,7 @@ class Listener:
         if RoomUserSeqEvent is not None:
             @client.on(RoomUserSeqEvent)
             async def _on_seq(e):
+                self._last_rx = time.monotonic()
                 n = next((getattr(e, a, None)
                           for a in ("m_total", "total", "viewer_count")
                           if getattr(e, a, None) is not None), None)
@@ -77,20 +92,46 @@ class Listener:
 
         return client
 
+    async def _connect(self, client):
+        try:
+            await client.connect()              # blocks until disconnected
+        except Exception as e:
+            print(f"[listener] not connected ({type(e).__name__}); retrying in 5s...")
+
     async def run(self):
         # Never die: stream ends, account goes off/on air, network blips — reconnect
         # with a FRESH client each time (see _make_client). Retry fast (5s) when the
         # account is simply not live yet, so Bello starts answering within seconds
-        # of the account going live rather than up to 15s later.
+        # of the account going live.
+        #
+        # A stall WATCHDOG guards the case connect() cannot: once connected, it
+        # blocks forever, so if the room silently dies (the live was restarted) it
+        # would hang there receiving nothing. We watch the event clock and, on
+        # silence, disconnect to force a fresh connection to the CURRENT room.
         while True:
             client = self._make_client()
+            self._last_rx = time.monotonic()
+            conn = asyncio.create_task(self._connect(client))
+
+            while not conn.done():
+                await asyncio.sleep(5)
+                if time.monotonic() - self._last_rx > _STALL_SECONDS:
+                    print(f"[listener] no events for {int(_STALL_SECONDS)}s — stale "
+                          f"connection (live likely restarted); forcing reconnect")
+                    try:
+                        await client.disconnect()   # unblocks connect() -> conn ends
+                    except Exception:
+                        pass
+                    break
+
+            if not conn.done():
+                conn.cancel()
             try:
-                await client.connect()
-            except Exception as e:
-                print(f"[listener] not connected ({type(e).__name__}); retrying in 5s...")
-            finally:
-                try:
-                    await client.disconnect()
-                except Exception:
-                    pass
+                await conn
+            except (asyncio.CancelledError, Exception):
+                pass
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
             await asyncio.sleep(5)
