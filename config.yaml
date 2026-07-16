@@ -36,12 +36,23 @@ tts:
   # config works on a Mac and on /root/bella on the server. Absolute still works.
   chatterbox_ref_audio: "voice_samples/bella_ref_en.wav"
   chatterbox_ref_audio_ar: "voice_samples/bella_ref_ar.wav"
-  # Emotion / expressiveness (0.0 flat .. 1.0 intense). Delivery is NOT flat: the
-  # baseline is used for ordinary lines and `_excited` for lines the brain wrote
-  # with an "!" or a wow-word, so a punchline lands harder than a price quote
-  # (see emphasis_for() in src/voice.py). Past ~0.9 Chatterbox gets shouty.
-  chatterbox_exaggeration: 0.75          # ordinary spoken lines
-  chatterbox_exaggeration_excited: 0.9   # punchlines, reactions, "!" lines
+  # Emotion / expressiveness (0.0 flat .. 1.0 intense). ONLY the multilingual
+  # (Arabic) engine reads these — Turbo (English) ignores exaggeration entirely,
+  # so tuning them here changes ARABIC ONLY and never touches the English voice.
+  #
+  # KEEP THEM LOW AND EQUAL. High exaggeration makes the multilingual model DRIFT
+  # OFF the cloned reference voice — that is why the Arabic "accent kept changing":
+  # at 0.75/0.9 it wandered away from your recorded Arabic clip, and because the
+  # value flipped between 0.75 and 0.9 per sentence, the identity wobbled every
+  # other line. A single low value (~0.4) tracks your Arabic reference clip
+  # faithfully and stays put, so Arabic sounds like ONE consistent person.
+  chatterbox_exaggeration: 0.4           # Arabic only — low = faithful clone
+  chatterbox_exaggeration_excited: 0.4   # equal to base = no per-sentence wobble
+  # Global playback speed (pitch-preserved). Chatterbox has no speed knob — Turbo
+  # ignores every pacing parameter — so we time-stretch the finished audio with
+  # ffmpeg instead. 1.0 = original; BELOW 1.0 = SLOWER. 0.9 slows him ~10% so he
+  # stops sounding rushed WITHOUT dropping his pitch. Applies to both languages.
+  speed: 0.9
   # --- used only when provider: kokoro ---
   voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
   kokoro_lang: "a"               # 'a' US English, 'b' UK English

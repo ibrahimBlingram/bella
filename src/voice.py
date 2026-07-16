@@ -27,6 +27,7 @@ import glob
 import platform
 import asyncio
 import re
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -44,11 +45,44 @@ _EXCITED = re.compile(
     re.IGNORECASE)
 _CURIOUS = re.compile(r"\?\s*$")
 
-# Longest we will wait on the audio device before deciding it is wedged. A single
-# spoken line is a few seconds; PortAudio blocking for 20s means the device is gone,
-# not busy. Nothing here should ever hang forever — a 24/7 stream that goes silently
-# mute is worse than one that speaks a bad line.
-_AUDIO_TIMEOUT = 20.0
+# Longest we will wait to OPEN or STOP the audio device before deciding it is gone.
+# Nothing here should ever hang forever — a 24/7 stream that goes silently mute is
+# worse than one that speaks a bad line.
+_AUDIO_TIMEOUT = 8.0
+
+# Audio is written to the device in small CHUNKS, not one blob per sentence. A
+# whole-sentence write() only returns once its audio has DRAINED — it blocks for
+# the LENGTH of the line — so a single-shot timeout had to be huge (20s) to avoid
+# false alarms on long lines, which meant a genuinely dead device froze the stream
+# for a full 20s before recovering. Chunking decouples "how long is this line"
+# from "is the device dead": each chunk blocks ~its own duration, so a short
+# per-chunk timeout catches a wedge in seconds without tripping on long lines.
+_CHUNK_SECONDS = 0.4
+_WRITE_TIMEOUT = 4.0
+
+
+def _time_stretch(pcm: bytes, sr: int, speed: float) -> bytes:
+    """Slow down (speed<1.0) or speed up PCM WITHOUT changing pitch, via ffmpeg's
+    atempo filter. Chatterbox has no speed control — Turbo ignores every pacing
+    knob — so time-stretching the finished audio is the only way to make him talk
+    slower without turning him into a chipmunk or a baritone. On ANY failure we
+    return the ORIGINAL audio: a wrong speed beats dropped speech on a live stream."""
+    if not pcm or abs(speed - 1.0) < 1e-3:
+        return pcm
+    try:
+        import subprocess
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        p = subprocess.run(
+            [ff, "-hide_banner", "-loglevel", "error",
+             "-f", "s16le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
+             "-filter:a", f"atempo={speed:.4f}",
+             "-f", "s16le", "-ar", str(sr), "-ac", "1", "pipe:1"],
+            input=pcm, capture_output=True)
+        return p.stdout or pcm
+    except Exception as e:
+        print(f"[voice] speed adjust skipped ({e}); playing at normal speed")
+        return pcm
 
 
 def emphasis_for(text: str, base: float, excited: float) -> float:
@@ -271,6 +305,12 @@ class ChatterboxTurboTTS:
         if tts.get("sample_rate") != self.sr:
             print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
                   f"set tts.sample_rate {self.sr}.")
+        # Warm up: the first generate() compiles CUDA kernels (~seconds). Pay that
+        # NOW, at startup, so Bello's first spoken line on air isn't slow.
+        try:
+            self._synth_sync("Hello there.")
+        except Exception:
+            pass
         print("[voice] Chatterbox Turbo (English) ready on cuda "
               "— performs [laugh]/[chuckle]/[sigh] as real sounds")
 
@@ -280,11 +320,13 @@ class ChatterboxTurboTTS:
         return _tensor_to_pcm16(wav)
 
     async def synth(self, text: str, lang: str = "en"):
+        t0 = time.perf_counter()
         try:
             pcm = await asyncio.to_thread(self._synth_sync, text)
         except Exception as e:
             print(f"[voice] Chatterbox (Turbo) failed: {e}")
             return
+        print(f"[voice] EN synth {time.perf_counter() - t0:.2f}s")
         if pcm:
             yield pcm
 
@@ -308,10 +350,21 @@ class ChatterboxMultiTTS:
         if tts.get("sample_rate") != self.sr:
             print(f"[voice] WARNING: Chatterbox outputs {self.sr} Hz — "
                   f"set tts.sample_rate {self.sr}.")
+        # Warm up BOTH language paths now so the FIRST Arabic comment (and the first
+        # English one) doesn't pay the cold-start kernel-compile cost live. This is
+        # a big part of the "delay when it switches to Arabic" — the Arabic path was
+        # ice cold until the first Arabic viewer, who then waited on the warm-up.
+        try:
+            self._synth_sync("Hello there.", "en", self.ref_en)
+            self._synth_sync("مرحبا بكم.", "ar", self.ref_ar)
+        except Exception:
+            pass
         print(f"[voice] Chatterbox Multilingual (Arabic + English) ready on cuda "
               f"(emotion {self.exaggeration} .. {self.excited})")
 
     def _synth_sync(self, text, lang_id, ref):
+        # Constant, low exaggeration keeps the delivery ON the cloned reference
+        # voice; a high value drifts off it (that was the wandering-accent bug).
         wav = self.model.generate(
             text, language_id=lang_id, audio_prompt_path=ref,
             exaggeration=emphasis_for(text, self.exaggeration, self.excited))
@@ -320,11 +373,13 @@ class ChatterboxMultiTTS:
     async def synth(self, text: str, lang: str = "en"):
         lang_id = "ar" if lang == "ar" else "en"
         ref = self.ref_ar if lang_id == "ar" else self.ref_en
+        t0 = time.perf_counter()
         try:
             pcm = await asyncio.to_thread(self._synth_sync, text, lang_id, ref)
         except Exception as e:
             print(f"[voice] Chatterbox (Multilingual, {lang_id}) failed: {e}")
             return
+        print(f"[voice] {lang_id.upper()} synth {time.perf_counter() - t0:.2f}s")
         if pcm:
             yield pcm
 
@@ -346,6 +401,8 @@ class Voice:
     def __init__(self, cfg):
         self.sr = cfg["tts"]["sample_rate"]
         self.device = cfg["tts"]["output_device"]
+        # Global playback speed (pitch-preserved). <1.0 = slower. See _time_stretch.
+        self.speed = float(cfg["tts"].get("speed", 1.0))
         provider = (cfg["tts"].get("provider") or "kokoro").lower()
 
         # config.yaml is set for the GPU server (chatterbox_multi). On a machine
@@ -449,6 +506,11 @@ class Voice:
                         if not sentence:
                             continue
                     async for pcm in engine.synth(sentence, lang):
+                        if self.speed != 1.0:
+                            # Slow him down (pitch-preserved) OFF the event loop so
+                            # audio already playing doesn't stutter while we stretch.
+                            pcm = await asyncio.to_thread(
+                                _time_stretch, pcm, self.sr, self.speed)
                         await queue.put(pcm)
             finally:
                 await queue.put(DONE)
@@ -488,19 +550,31 @@ class Voice:
                     self.speaking.set()
                     if on_start:
                         on_start()
-                try:
-                    await asyncio.wait_for(
-                        asyncio.to_thread(stream.write, pcm), timeout=_AUDIO_TIMEOUT)
-                except asyncio.TimeoutError:
-                    # The device is wedged. Bail out of THIS line rather than hang
-                    # forever holding the lock — the next line reopens the stream.
-                    self._audio_broken = True         # force a re-init next time
-                    print(f"[voice] audio write blocked >{_AUDIO_TIMEOUT}s — device "
-                          f"wedged; re-initialising the audio backend")
-                    return
-                except Exception as e:
-                    self._audio_broken = True
-                    print(f"[voice] audio write failed ({e}); re-initialising")
+                # Write in small chunks (see _CHUNK_SECONDS): a wedged device is
+                # caught in ~_WRITE_TIMEOUT seconds instead of freezing the stream
+                # for the whole 20s a single-shot write used to allow.
+                chunk = int(self.sr * _CHUNK_SECONDS) * 2   # int16 mono: 2 bytes/sample
+                wedged = False
+                for off in range(0, len(pcm), chunk):
+                    frame = pcm[off:off + chunk]
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(stream.write, frame),
+                            timeout=_WRITE_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        # The device is wedged. Bail out of THIS line rather than
+                        # hang holding the lock — the next line reopens the stream.
+                        self._audio_broken = True     # force a re-init next time
+                        print(f"[voice] audio write blocked >{_WRITE_TIMEOUT}s — "
+                              f"device wedged; re-initialising the audio backend")
+                        wedged = True
+                        break
+                    except Exception as e:
+                        self._audio_broken = True
+                        print(f"[voice] audio write failed ({e}); re-initialising")
+                        wedged = True
+                        break
+                if wedged:
                     return
             await producer          # re-raise anything the producer swallowed
         finally:
