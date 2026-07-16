@@ -125,13 +125,13 @@ class Brain:
         return ("\n\n=== FULL PROJECT DATA (use these EXACT facts; do not invent "
                 "beyond them) ===\n" + detail)
 
-    def _gemini_stream(self, prompt: str, ground: bool):
+    def _gemini_stream(self, prompt: str, ground: bool, max_tokens: int):
         """Blocking generator of raw text chunks from Gemini."""
         from google.genai import types
         tools = [types.Tool(google_search=types.GoogleSearch())] if ground else None
         cfg = types.GenerateContentConfig(
             system_instruction=self.system,
-            max_output_tokens=self.max_tokens,
+            max_output_tokens=max_tokens,
             temperature=self.temperature,
             tools=tools,
             # gemini-2.5-flash "thinks" by default, and thinking tokens count
@@ -145,14 +145,14 @@ class Brain:
             if text:
                 yield text
 
-    def _groq_stream(self, prompt: str, ground: bool):
+    def _groq_stream(self, prompt: str, ground: bool, max_tokens: int):
         """Blocking generator of raw text chunks from Groq (OpenAI-shaped API).
         `ground` is ignored: Groq has no web-search tool."""
         stream = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "system", "content": self.system},
                       {"role": "user", "content": prompt}],
-            max_completion_tokens=self.max_tokens,
+            max_completion_tokens=max_tokens,
             temperature=self.temperature,
             stream=True,
         )
@@ -162,17 +162,18 @@ class Brain:
             if delta:
                 yield delta
 
-    def _tokens(self, prompt: str, ground: bool):
+    def _tokens(self, prompt: str, ground: bool, max_tokens: int = None):
+        mt = max_tokens or self.max_tokens
         return (self._groq_stream if self.provider == "groq"
-                else self._gemini_stream)(prompt, ground)
+                else self._gemini_stream)(prompt, ground, mt)
 
-    async def _stream_sentences(self, prompt: str, ground: bool):
+    async def _stream_sentences(self, prompt: str, ground: bool, max_tokens: int = None):
         """Yield whole sentences. Retries transient failures; never raises up to caller."""
         for attempt in range(_MAX_ATTEMPTS):
             buf = ""
             yielded_any = False
             try:
-                async for text in _aiter(self._tokens(prompt, ground)):
+                async for text in _aiter(self._tokens(prompt, ground, max_tokens)):
                     buf += text
                     parts = _SENT_END.split(buf)
                     if len(parts) > 1:
@@ -203,10 +204,21 @@ class Brain:
         question is a LEAD — so the answer has to be specific and, above all,
         accurate. A wrong price is worse than no price."""
         ground = self.allow_grounding and bool(_NEEDS_WEB.search(question))
-        langname = "Arabic" if lang == "ar" else "English"
+        if lang == "ar":
+            # Arabic synthesis (the multilingual model) is ~5-10x slower than the
+            # English voice on this GPU, so a long Arabic reply = a long wait. Keep
+            # Arabic to ONE short sentence: far less audio to generate, so the answer
+            # actually lands quickly. English stays fuller (its voice is fast).
+            length_rule = ("Reply as Bello in Arabic, in ONE short spoken sentence — "
+                           "no more than about 12 words. Warm, but brief.")
+            max_tokens = 64
+        else:
+            length_rule = ("Reply as Bello in English, in 1-2 short, lively spoken "
+                           "sentences.")
+            max_tokens = self.max_tokens
         prompt = (
             f'A viewer in the live chat just said: "{question}".\n'
-            f"Reply as Bello in {langname}, in 1-2 short, lively spoken sentences.\n"
+            f"{length_rule}\n"
             f"If they asked about a Sobha project, ANSWER IT — the price, the size, "
             f"the amenities, who it suits — using ONLY the project facts you have. "
             f"Quote prices as starting prices ('from AED ...'), never as a final "
@@ -218,7 +230,7 @@ class Brain:
             f"bring it back to what's on screen."
         )
         prompt += self._retrieve(question)
-        async for s in self._stream_sentences(prompt, ground):
+        async for s in self._stream_sentences(prompt, ground, max_tokens=max_tokens):
             yield s
 
     # Openers to FORCE variety on the Dubai segments. Left to itself the model
