@@ -39,7 +39,19 @@ if _KEY:
 # keeps blocking on it forever, never erroring, never reconnecting, never
 # delivering another event. When that silence trips, we force a reconnect so a
 # fresh client finds the NEW room.
-_STALL_SECONDS = 45.0
+#
+# Kept generous ON PURPOSE. Every reconnect needs a fresh EulerStream SIGNATURE,
+# and the free key is rate-limited — reconnect too eagerly and you exhaust the
+# quota (SignatureRateLimitError), after which you can't connect at all. A long
+# threshold means we only reconnect when the connection is genuinely dead, not
+# during a normal quiet spell, so we spend signatures sparingly.
+_STALL_SECONDS = 90.0
+
+# Backoff before the NEXT connect attempt. A signature rate-limit needs a LONG
+# cool-off or we just keep hammering EulerStream and stay locked out; ordinary
+# "not live yet" retries can be quick.
+_BACKOFF_RATELIMIT = 60.0
+_BACKOFF_NORMAL = 5.0
 
 
 class Listener:
@@ -49,6 +61,7 @@ class Listener:
         self.username = username
         self.q = queue
         self._last_rx = 0.0                     # monotonic time of last event
+        self._last_err = None                   # type name of last connect error
 
     def _make_client(self):
         """Build a FRESH client with handlers attached.
@@ -95,19 +108,27 @@ class Listener:
     async def _connect(self, client):
         try:
             await client.connect()              # blocks until disconnected
+            self._last_err = None               # ended cleanly (we disconnected it)
         except Exception as e:
-            print(f"[listener] not connected ({type(e).__name__}); retrying in 5s...")
+            self._last_err = type(e).__name__
+            rl = "RateLimit" in self._last_err
+            wait = int(_BACKOFF_RATELIMIT if rl else _BACKOFF_NORMAL)
+            extra = (" — EulerStream signature quota hit; backing off so it can "
+                     "recover (a paid key raises this limit)") if rl else ""
+            print(f"[listener] not connected ({self._last_err}); "
+                  f"retrying in {wait}s{extra}")
 
     async def run(self):
         # Never die: stream ends, account goes off/on air, network blips — reconnect
-        # with a FRESH client each time (see _make_client). Retry fast (5s) when the
-        # account is simply not live yet, so Bello starts answering within seconds
-        # of the account going live.
+        # with a FRESH client each time (see _make_client).
         #
         # A stall WATCHDOG guards the case connect() cannot: once connected, it
         # blocks forever, so if the room silently dies (the live was restarted) it
         # would hang there receiving nothing. We watch the event clock and, on
-        # silence, disconnect to force a fresh connection to the CURRENT room.
+        # silence, disconnect to force a fresh connection to the CURRENT room —
+        # but sparingly (see _STALL_SECONDS), because every reconnect spends a
+        # rate-limited EulerStream signature.
+        self._last_err = None
         while True:
             client = self._make_client()
             self._last_rx = time.monotonic()
@@ -134,4 +155,6 @@ class Listener:
                 await client.disconnect()
             except Exception:
                 pass
-            await asyncio.sleep(5)
+            # Long cool-off after a signature rate-limit; quick retry otherwise.
+            rl = self._last_err and "RateLimit" in self._last_err
+            await asyncio.sleep(_BACKOFF_RATELIMIT if rl else _BACKOFF_NORMAL)
