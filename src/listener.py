@@ -53,7 +53,7 @@ _STALL_SECONDS = 90.0
 # cool-off must be LONGER than the throttle window (~2-3 min observed) so the room
 # clears BETWEEN attempts. This only bites on (re)connect; a live connection holds
 # on one signature and never re-signs. Ordinary "not live yet" retries stay quick.
-_BACKOFF_RATELIMIT = 180.0
+_BACKOFF_RATELIMIT = 30.0
 _BACKOFF_NORMAL = 5.0
 
 # How often to POLL is_live() while the account is offline. is_live() is a cheap
