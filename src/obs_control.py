@@ -18,6 +18,7 @@ So the mutating calls are queued to a background thread and return instantly. Th
 queue preserves order, so "show talk / hide idle" can never land out of sequence.
 Reads (which only happen at startup or in the watchdog) stay direct.
 """
+import os
 import queue
 import random
 import threading
@@ -25,6 +26,68 @@ import threading
 import obsws_python as obs
 
 from paths import abspath, abspaths
+
+
+def setup_music(client, scene: str, music_cfg: dict):
+    """Create (or update) a LOOPING background-music source and its sidechain
+    DUCKING compressor, keyed to the voice source. Idempotent — safe to run on
+    every startup and safe to re-run against a live OBS.
+
+    This is intentionally standalone (takes a bare obsws ReqClient) so it can be
+    applied to a running OBS WITHOUT restarting Bello, and it only ever touches
+    the music source + its own filter — never the voice/avatar sources.
+
+    The ducking: a Compressor on the music, with `sidechain_source` set to the
+    VOICE source. When the voice rises above the threshold the music is pulled
+    down hard; when he goes quiet it swells back up over the release time.
+    """
+    if not music_cfg or not music_cfg.get("file"):
+        return
+    src = music_cfg.get("source_name", "Music")
+    fname = music_cfg.get("filter_name", "VoiceDuck")
+    path = abspath(music_cfg["file"])
+    if not path or not os.path.exists(path):
+        print(f"[obs] music file not found ({path}); background music off.")
+        return
+
+    # 1) The source. ffmpeg_source plays the file; looping keeps it going forever.
+    #    Creating it in the scene puts its audio into the stream mix.
+    settings = {"local_file": path, "looping": True, "is_local_file": True}
+    existing = {i["inputName"] for i in client.get_input_list().inputs}
+    if src not in existing:
+        client.create_input(scene, src, "ffmpeg_source", settings, True)
+    else:
+        client.set_input_settings(src, settings, overlay=True)
+
+    # 2) Its volume WHEN NOT DUCKED (i.e. while he's silent).
+    try:
+        client.set_input_volume(src, vol_db=float(music_cfg.get("volume_db", -6.0)))
+    except Exception as e:
+        print(f"[obs] music volume skipped: {e}")
+
+    # 3) The ducking compressor.
+    d = music_cfg.get("duck") or {}
+    fsettings = {
+        "ratio": float(d.get("ratio", 12.0)),
+        "threshold": float(d.get("threshold_db", -38.0)),
+        "attack_time": int(d.get("attack_ms", 6)),
+        "release_time": int(d.get("release_ms", 350)),
+        "output_gain": float(d.get("output_gain_db", 0.0)),
+        "sidechain_source": d.get("sidechain_source", "BellaAudio"),
+    }
+    try:
+        have = {f["filterName"] for f in client.get_source_filter_list(src).filters}
+    except Exception:
+        have = set()
+    try:
+        if fname in have:
+            client.set_source_filter_settings(src, fname, fsettings)
+        else:
+            client.create_source_filter(src, fname, "compressor_filter", fsettings)
+        print(f"[obs] background music '{src}' + ducking '{fname}' ready "
+              f"(keyed to {fsettings['sidechain_source']}).")
+    except Exception as e:
+        print(f"[obs] music ducking filter skipped: {e}")
 
 
 class OBS:
@@ -250,3 +313,11 @@ class OBS:
     def demo_background(self):
         if self.demos:
             self._submit(self._set_image, self.bg_src, random.choice(self.demos))
+
+    def ensure_music(self, music_cfg: dict):
+        """Set up looping background music + voice ducking. Called once at startup
+        so a fresh box gets it automatically; a no-op if music_cfg is empty."""
+        try:
+            setup_music(self.c, self.scene, music_cfg)
+        except Exception as e:
+            print(f"[obs] background music setup skipped: {e}")

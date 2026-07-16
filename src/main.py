@@ -209,6 +209,10 @@ async def main():
         obs.apply_reel_layout(drop_px=int(o.get("avatar_drop_px", 0)),
                               shift_x=int(o.get("avatar_shift_x", 0)))
 
+    # Looping background music with auto-ducking (swells when he's silent, drops
+    # when he speaks). Purely an OBS overlay — does not touch his voice pipeline.
+    obs.ensure_music(o.get("music"))
+
     m = cfg.get("media") or {}
     featured = Featured(abspath((cfg.get("data") or {}).get("sobha_featured")),
                         abspath(m.get("projects_root")))

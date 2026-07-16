@@ -143,3 +143,22 @@ obs:
     - "clips/Background/B1.png"
     - "clips/Background/B2.png"
     - "clips/Background/B3.png"
+  # Looping background music with AUTO-DUCKING. The track plays on a loop; a
+  # sidechain compressor on it, keyed to Bello's voice (BellaAudio), pulls the
+  # music DOWN the instant he speaks and lets it swell back UP when he's silent.
+  # This is done entirely in OBS — it never touches his voice audio pipeline.
+  # Set file: null (or remove this block) to turn background music off.
+  music:
+    file: "clips/music.mp3"
+    volume_db: -6.0            # music level when he is SILENT (present, not blaring)
+    source_name: "Music"
+    filter_name: "VoiceDuck"
+    # Sidechain compressor = the ducking. Keyed to the voice source below. Defaults
+    # duck the music to near-silence while he talks; tune by ear.
+    duck:
+      sidechain_source: "BellaAudio"   # his voice source — the ducking trigger
+      ratio: 12.0               # higher = harder duck
+      threshold_db: -38.0       # any voice above this triggers the duck
+      attack_ms: 6              # how fast it ducks when he starts (fast)
+      release_ms: 350           # how fast it swells back when he stops (smooth)
+      output_gain_db: 0.0
