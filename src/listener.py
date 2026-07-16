@@ -47,10 +47,13 @@ if _KEY:
 # during a normal quiet spell, so we spend signatures sparingly.
 _STALL_SECONDS = 90.0
 
-# Backoff before the NEXT connect attempt. A signature rate-limit needs a LONG
-# cool-off or we just keep hammering EulerStream and stay locked out; ordinary
-# "not live yet" retries can be quick.
-_BACKOFF_RATELIMIT = 60.0
+# Backoff before the NEXT connect attempt. EulerStream's free key throttles
+# repeated SIGNATURES of the SAME room, and the throttle RENEWS on each attempt —
+# so a short retry keeps it locked out forever (each retry resets the clock). The
+# cool-off must be LONGER than the throttle window (~2-3 min observed) so the room
+# clears BETWEEN attempts. This only bites on (re)connect; a live connection holds
+# on one signature and never re-signs. Ordinary "not live yet" retries stay quick.
+_BACKOFF_RATELIMIT = 180.0
 _BACKOFF_NORMAL = 5.0
 
 
