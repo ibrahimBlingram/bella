@@ -56,6 +56,15 @@ _STALL_SECONDS = 90.0
 _BACKOFF_RATELIMIT = 180.0
 _BACKOFF_NORMAL = 5.0
 
+# How often to POLL is_live() while the account is offline. is_live() is a cheap
+# room-info lookup that does NOT spend the Sign API's "connections started"
+# budget — unlike connect(). We only ever call the (budget-spending) connect()
+# once is_live() is true, so the offline wait can never hammer the signer. This
+# is the fix for the failure where, in the ~minute after the broadcast starts and
+# before TikTok registers the live, the old 5s connect-retry loop burned through
+# the sign limit and then couldn't connect AT ALL once the account went live.
+_OFFLINE_POLL = 15.0
+
 
 class Listener:
     def __init__(self, username: str, queue):
@@ -116,10 +125,12 @@ class Listener:
             self._last_err = type(e).__name__
             rl = "RateLimit" in self._last_err
             wait = int(_BACKOFF_RATELIMIT if rl else _BACKOFF_NORMAL)
-            extra = (" — EulerStream signature quota hit; backing off so it can "
-                     "recover (a paid key raises this limit)") if rl else ""
-            print(f"[listener] not connected ({self._last_err}); "
-                  f"retrying in {wait}s{extra}")
+            if rl:
+                # str(e) carries the server's own "try again in N seconds" message.
+                print(f"[listener] sign rate-limited ({str(e)[:120]}) — backing off "
+                      f"{wait}s. Free EulerStream key; a paid key removes this limit.")
+            else:
+                print(f"[listener] not connected ({self._last_err}); retrying in {wait}s")
 
     async def run(self):
         # Never die: stream ends, account goes off/on air, network blips — reconnect
@@ -134,6 +145,21 @@ class Listener:
         self._last_err = None
         while True:
             client = self._make_client()
+
+            # CHEAP liveness gate. is_live() does NOT spend the Sign API's
+            # "connections started" budget the way connect() does, so we can poll
+            # it freely. Only call the budget-spending connect() once TikTok says
+            # the account is actually live — this is what stops the offline-retry
+            # loop from hammering the signer into a rate-limit while TikTok is
+            # still registering a freshly-started broadcast.
+            try:
+                live = await client.is_live()
+            except Exception:
+                live = True          # probe failed — fall through and try connecting
+            if not live:
+                await asyncio.sleep(_OFFLINE_POLL)
+                continue
+
             self._last_rx = time.monotonic()
             conn = asyncio.create_task(self._connect(client))
 
