@@ -26,7 +26,14 @@ try:
 except Exception:                       # pragma: no cover - version fallback
     RoomUserSeqEvent = None
 
-# Optional: raise rate limits / reliability with a free EulerStream key.
+# EulerStream sign key — big reliability boost. WITHOUT it, TikTokLive uses the
+# public sign server, which rate-limits hard and keeps dropping the comment feed.
+#
+# CAUTION: do NOT rely on reading the key HERE at import time. main.py runs
+# `from listener import Listener` BEFORE it calls load_dotenv(), so at import the
+# key is not in the environment yet and this silently falls back to the public
+# server. The key is therefore (re)applied in Listener.__init__, which runs after
+# load_dotenv(). This line only helps if the key was already exported in the shell.
 _KEY = os.environ.get("EULERSTREAM_API_KEY")
 if _KEY:
     WebDefaults.tiktok_sign_api_key = _KEY
@@ -74,6 +81,20 @@ class Listener:
         self.q = queue
         self._last_rx = 0.0                     # monotonic time of last event
         self._last_err = None                   # type name of last connect error
+
+        # Apply the EulerStream key NOW (after main.py's load_dotenv), so the live
+        # listener actually uses it instead of the rate-limited public sign server.
+        # This is the fix for comments only connecting intermittently: on the key's
+        # own quota a single connect succeeds and HOLDS, delivering comments in real
+        # time, instead of the public server dropping every few seconds.
+        key = os.environ.get("EULERSTREAM_API_KEY")
+        if key:
+            WebDefaults.tiktok_sign_api_key = key
+            print(f"[listener] EulerStream key active (…{key[-6:]}) — using the key's "
+                  f"own quota, not the public sign server.")
+        else:
+            print("[listener] WARNING: no EULERSTREAM_API_KEY in env — falling back to "
+                  "the public sign server, which drops the comment feed often.")
 
     def _make_client(self):
         """Build a FRESH client with handlers attached.
