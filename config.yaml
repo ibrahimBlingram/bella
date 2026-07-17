@@ -5,9 +5,14 @@ llm:
   # gemini — Google Gemini Flash. Needs GEMINI_API_KEY *with billing enabled*: the
   #          free tier is 20 requests/DAY, which a live stream burns in minutes.
   provider: groq
-  model: llama-3.3-70b-versatile
-  # Other Groq models: llama-3.1-8b-instant (faster, but its Arabic is poor),
-  #   qwen/qwen3-32b, openai/gpt-oss-120b. For gemini: gemini-2.5-flash.
+  # Llama 4 Scout: reliably CLEAN Arabic. llama-3.3-70b leaks foreign scripts
+  # (Chinese/Korean/Latin) into Arabic in the full production context (0/6 clean in
+  # testing) — Scout was 6/6. It is also fast (MoE, no hidden reasoning) and strong
+  # in English, so both languages stay fluent. This is why Arabic is now the primary.
+  model: meta-llama/llama-4-scout-17b-16e-instruct
+  # Other Groq models: llama-3.3-70b-versatile (English-only, its Arabic drifts),
+  #   openai/gpt-oss-120b (clean Arabic too, but a slower reasoning model).
+  #   For gemini: gemini-2.5-flash.
   grounding: false               # Gemini ONLY (web search). Ignored on groq.
   max_output_tokens: 120         # short, spoken answers
   temperature: 0.9               # variety -> never-repeating narration
@@ -51,8 +56,13 @@ tts:
   # Global playback speed (pitch-preserved). Chatterbox has no speed knob — Turbo
   # ignores every pacing parameter — so we time-stretch the finished audio with
   # ffmpeg instead. 1.0 = original; BELOW 1.0 = SLOWER. 0.9 slows him ~10% so he
-  # stops sounding rushed WITHOUT dropping his pitch. Applies to both languages.
+  # stops sounding rushed WITHOUT dropping his pitch. Applies to English.
   speed: 0.9
+  # Arabic is the PRIMARY language and must be crystal-clear ("tajweed"-clean), so
+  # it plays a touch slower than English — slowing the multilingual Arabic voice
+  # sharpens each word without dropping pitch. Lower = clearer/slower. Falls back
+  # to `speed` if unset.
+  speed_ar: 0.86
   # --- used only when provider: kokoro ---
   voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
   kokoro_lang: "a"               # 'a' US English, 'b' UK English
@@ -73,7 +83,9 @@ tts:
 
 stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
-  language: en                   # en | ar | de | es | pt | fr
+  language: ar                   # PRIMARY language (narration + greetings). en | ar | de | es | pt | fr
+                                 # Comments are still answered in the language they
+                                 # were written in (Arabic->Arabic, English->English).
   theme: dubai_realestate        # loads knowledge/theme_<theme>.md  -> swap monthly
   # This is a MARKETING channel for Sobha, so most of the airtime promotes a
   # project. The rest is Dubai real-estate talk, which is what stops the stream

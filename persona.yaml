@@ -94,6 +94,17 @@ greetings:
   - "welcome {name}, good to see you"
   - "new face! welcome {name}"
 
+# Arabic greetings — used when stream.language is `ar` (the primary language).
+# Clear, warm Modern Standard Arabic. {name} may be a Latin-script nickname; that
+# is fine. No English words, no tashkeel.
+greetings_ar:
+  - "أهلاً وسهلاً {name}، نوّرت البث!"
+  - "يا هلا {name}، سعيد بوجودك معنا!"
+  - "{name} وصل، أهلاً بك في البث!"
+  - "مرحباً {name}! تفضّل وخلّيك معنا"
+  - "أهلاً {name}، سعداء بانضمامك إلينا"
+  - "وجه جديد! أهلاً وسهلاً {name}"
+
 # Used for the DUBAI segments (~30% of airtime). The other ~70% are project
 # spotlights, which use brain.narrate_project() instead.
 #

@@ -44,6 +44,21 @@ def is_arabic(text: str) -> bool:
     return bool(_ARABIC.search(text or ""))
 
 
+# One place that says HOW to write each language. Arabic is the channel's primary
+# language and must sound like a polished Dubai presenter — clear, fluent Modern
+# Standard Arabic, so the TTS pronounces every word cleanly. No English words or
+# Latin letters (the Arabic voice would mangle them), and no tashkeel/diacritics
+# (the model reads undiacritised text more naturally).
+def reply_language_clause(lang: str) -> str:
+    if lang == "ar":
+        return ("Reply ONLY in clear, fluent Modern Standard Arabic (الفصحى), the "
+                "way a professional Dubai real-estate presenter speaks — warm, "
+                "natural and easy to understand. Use complete, well-punctuated "
+                "sentences so every word is pronounced clearly. Do NOT use any "
+                "English words, Latin letters, transliteration, or tashkeel.")
+    return "Reply in English."
+
+
 async def _aiter(sync_gen):
     """Drive a blocking generator from async land without freezing the loop."""
     while True:
@@ -95,7 +110,11 @@ class Brain:
             persona["system_prompt"]
             + (f"\n\n{laughter.strip()}" if laughter else "")
             + "\n\nLANGUAGE: Reply in the language the current prompt tells you to "
-              "use. Default to English. Never mix two languages in one reply."
+              "use. ARABIC is this channel's PRIMARY language — when you write "
+              "Arabic, use clear, fluent Modern Standard Arabic (الفصحى) as a "
+              "professional Dubai presenter speaks: warm, natural, easy to follow, "
+              "no English words or Latin letters, no tashkeel. Never mix two "
+              "languages in one reply."
             + "\n\nDELIVERY: You are spoken aloud by an energetic TTS voice. Write "
               "like an excited, upbeat host — use natural exclamation marks and "
               "lively phrasing so you sound enthusiastic and warm. Don't put an "
@@ -205,13 +224,14 @@ class Brain:
         accurate. A wrong price is worse than no price."""
         ground = self.allow_grounding and bool(_NEEDS_WEB.search(question))
         if lang == "ar":
-            # Arabic synthesis (the multilingual model) is ~5-10x slower than the
-            # English voice on this GPU, so a long Arabic reply = a long wait. Keep
-            # Arabic to ONE short sentence: far less audio to generate, so the answer
-            # actually lands quickly. English stays fuller (its voice is fast).
-            length_rule = ("Reply as Bello in Arabic, in ONE short spoken sentence — "
-                           "no more than about 12 words. Warm, but brief.")
-            max_tokens = 64
+            # Arabic is the PRIMARY language now, so it gets a full, clear answer —
+            # not the old one-line cap. 1-2 complete, fluent MSA sentences: enough to
+            # actually answer the question and sound like a real Dubai presenter. The
+            # Arabic voice is slower to synthesize, so we keep it to 1-2 sentences (not
+            # a paragraph) to stay responsive — but clarity comes first.
+            length_rule = ("Reply as Bello in 1-2 complete, fluent spoken sentences. "
+                           + reply_language_clause("ar"))
+            max_tokens = 220
         else:
             length_rule = ("Reply as Bello in English, in 1-2 short, lively spoken "
                            "sentences.")
@@ -248,8 +268,10 @@ class Brain:
         "Open with a quick 'imagine this...' scenario.",
     ]
 
-    async def narrate(self, topic: str, covered: list[str]):
-        """Async iterator of spoken sentences for an idle-time (Dubai) segment."""
+    async def narrate(self, topic: str, covered: list[str], lang: str = "en"):
+        """Async iterator of spoken sentences for an idle-time (Dubai) segment.
+        `lang` picks the delivery language (en | ar). The English _OPENERS are
+        instructions to the model, not output — it still replies in `lang`."""
         # Vary the index by how much has been covered so it walks the list rather
         # than risk repeating (Math.random is unavailable in some sandboxes anyway).
         opener = self._OPENERS[len(covered) % len(self._OPENERS)]
@@ -258,7 +280,7 @@ class Brain:
             covered="; ".join(covered[-12:]) or "(nothing yet)",
         ) + f"\n{opener}\nBe genuinely funny — this is entertainment between listings, "
         prompt += ("not a lecture. Never start the same way you did last time. "
-                   "Reply in English.")
+                   + reply_language_clause(lang))
         prompt += self._retrieve(topic)
         async for s in self._stream_sentences(prompt, ground=False):
             yield s
@@ -268,7 +290,6 @@ class Brain:
         """Spoken spotlight promoting one Sobha development (its images are on
         screen). Uses ONLY the supplied facts; never invents prices/numbers.
         `lang` picks the reply language (en | ar)."""
-        langname = "Arabic" if lang == "ar" else "English"
         prompt = (
             f'Do a lively 2-3 sentence spoken spotlight on the Sobha Realty '
             f'development "{name}". Its photos are on screen right now, so paint '
@@ -279,7 +300,7 @@ class Brain:
             f'Use ONLY the facts below; never invent prices, numbers, or features.\n'
             f'Do NOT repeat points already covered today: '
             f'{"; ".join(covered[-12:]) or "(nothing yet)"}.\n'
-            f'Reply in {langname}.\n\n=== PROJECT FACTS ===\n{facts}'
+            f'{reply_language_clause(lang)}\n\n=== PROJECT FACTS ===\n{facts}'
         )
         async for s in self._stream_sentences(prompt, ground=False):
             yield s

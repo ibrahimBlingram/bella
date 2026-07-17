@@ -401,8 +401,11 @@ class Voice:
     def __init__(self, cfg):
         self.sr = cfg["tts"]["sample_rate"]
         self.device = cfg["tts"]["output_device"]
-        # Global playback speed (pitch-preserved). <1.0 = slower. See _time_stretch.
+        # Playback speed (pitch-preserved). <1.0 = slower. See _time_stretch.
+        # Arabic gets its own (usually slower) speed for clarity — it's the primary
+        # language and must be crystal-clear. Falls back to `speed` if unset.
         self.speed = float(cfg["tts"].get("speed", 1.0))
+        self.speed_ar = float(cfg["tts"].get("speed_ar", self.speed))
         provider = (cfg["tts"].get("provider") or "kokoro").lower()
 
         # config.yaml is set for the GPU server (chatterbox_multi). On a machine
@@ -484,6 +487,8 @@ class Voice:
 
     async def say(self, sentences, lang="en", on_start=None, on_stop=None):
         engine = self._engine(lang)
+        # Arabic plays a touch slower (clarity); English keeps its own pace.
+        speed = self.speed_ar if lang == "ar" else self.speed
 
         # Synthesize AHEAD of playback. Non-streaming engines (edge, chatterbox)
         # emit one blob per sentence, so a serial synth->play->synth loop leaves
@@ -506,11 +511,11 @@ class Voice:
                         if not sentence:
                             continue
                     async for pcm in engine.synth(sentence, lang):
-                        if self.speed != 1.0:
+                        if speed != 1.0:
                             # Slow him down (pitch-preserved) OFF the event loop so
                             # audio already playing doesn't stutter while we stretch.
                             pcm = await asyncio.to_thread(
-                                _time_stretch, pcm, self.sr, self.speed)
+                                _time_stretch, pcm, self.sr, speed)
                         await queue.put(pcm)
             finally:
                 await queue.put(DONE)

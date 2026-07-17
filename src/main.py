@@ -188,6 +188,10 @@ async def main():
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
     persona = yaml.safe_load((ROOT / "persona.yaml").read_text())
     theme = cfg["stream"]["theme"]
+    # PRIMARY language: what Bello narrates and greets in (Arabic by default now).
+    # Viewer comments are still answered in whatever language they were written in
+    # (see handle_events) — this only sets his own default voice.
+    primary_lang = (cfg["stream"].get("language") or "en").lower()
     knowledge, theme_text = kb.load(ROOT, theme)
     seeds = _seeds(theme_text) or [f"why {theme} matters for creators"]
 
@@ -359,11 +363,17 @@ async def main():
                 continue
             batch, state["pending_greets"] = names[:GREET_MAX_NAMES], []
             state["last_greet"] = time.time()
+            # Greet in the PRIMARY language. Arabic uses its own templates
+            # (greetings_ar); if none are set we fall back to the English ones.
+            greetings = (persona.get("greetings_ar") if primary_lang == "ar"
+                         else None) or persona["greetings"]
             if len(batch) == 1:
-                line = random.choice(persona["greetings"]).format(name=batch[0])
+                line = random.choice(greetings).format(name=batch[0])
+            elif primary_lang == "ar":
+                line = f"أهلاً وسهلاً {'، '.join(batch[:-1])} و{batch[-1]}!"
             else:
                 line = f"welcome in {', '.join(batch[:-1])} and {batch[-1]}!"
-            await speak(_one(line))
+            await speak(_one(line), lang=primary_lang)
 
     # ---- segment prefetch -------------------------------------------------
     # Ask the brain for the NEXT segment while Bello is still speaking the current
@@ -374,9 +384,10 @@ async def main():
     async def _write_segment():
         kind, payload = next(segments)
         if kind == "project":
-            gen = brain.narrate_project(payload.name, payload.facts, topics.covered)
+            gen = brain.narrate_project(payload.name, payload.facts, topics.covered,
+                                        lang=primary_lang)
         else:
-            gen = brain.narrate(payload, topics.covered)
+            gen = brain.narrate(payload, topics.covered, lang=primary_lang)
         # Drain the brain's stream to a list HERE, off the critical path.
         return kind, payload, [s async for s in gen]
 
@@ -442,11 +453,11 @@ async def main():
                 if kind == "project":
                     # Background AND title set together — they cannot desync.
                     await slideshow.start(payload, payload.name, _price_of(payload))
-                    await speak(_from_list(sentences))
+                    await speak(_from_list(sentences), lang=primary_lang)
                     topics.mark(payload.name)
                 else:
                     obs.hide_title()            # Dubai hook, not a project
-                    await speak(_from_list(sentences))
+                    await speak(_from_list(sentences), lang=primary_lang)
                     topics.mark(payload)
                 continue
 
@@ -456,7 +467,8 @@ async def main():
                 state["demo_on"] = True
             if quiet >= idle_after:
                 topic = topics.next()
-                await speak(brain.narrate(topic, topics.covered))
+                await speak(brain.narrate(topic, topics.covered, lang=primary_lang),
+                            lang=primary_lang)
                 topics.mark(topic)
 
     async def watchdog():
