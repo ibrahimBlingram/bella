@@ -22,6 +22,7 @@ import os
 import queue
 import random
 import threading
+import time
 
 import obsws_python as obs
 
@@ -352,6 +353,18 @@ class OBS:
             if name not in existing:
                 self.c.create_input(self.scene, name, "text_ft2_source_v2",
                                     settings, True)
+                # A just-created input isn't always queryable on the very next
+                # request — on a COLD OBS profile the follow-up filter/transform
+                # calls come back "no source found by that name" and the Scroll
+                # filter silently fails to attach (the ticker then shows but never
+                # moves). Wait until OBS actually lists the source before touching
+                # its filters, so a fresh box works on the first startup, not only
+                # after a second restart.
+                for _ in range(15):
+                    time.sleep(0.2)
+                    if name in {i["inputName"]
+                                for i in self.c.get_input_list().inputs}:
+                        break
             else:
                 self.c.set_input_settings(name, settings, overlay=True)
             # The Scroll filter is the movement. loop repeats the text so the band is
