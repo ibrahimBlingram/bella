@@ -115,6 +115,41 @@ def strip_stage_directions(text: str) -> str:
     return re.sub(r"\s{2,}", " ", _STAGE_DIRECTION.sub("", text)).strip()
 
 
+# Foreign scripts that sometimes leak from the LLM into an Arabic reply (CJK,
+# Hangul, Devanagari, Japanese kana). They are ALWAYS an error in Arabic copy and
+# the voice would gibber them, so they're removed outright before synthesis.
+_FOREIGN_SCRIPTS = re.compile(r"[一-鿿가-힯ऀ-ॿ"
+                              r"぀-ヿ]")
+
+
+def normalize_arabic(text: str) -> str:
+    """Make Arabic text speak cleanly: prices in Arabic WORDS (not 'AED'/'M'/'K'),
+    and no stray foreign-script characters. A safety net behind the prompt — the
+    model is told to do this, but a viewer hears whatever slips through, so we also
+    enforce it here right before the voice speaks."""
+    t = text
+    # Prices: 'AED 1.83 M' / 'AED 250K' / 'AED 900,000' -> Arabic words, right order.
+    t = re.sub(r"(?i)\bAED\s*([\d.,]+)\s*M\b", r"\1 مليون درهم", t)
+    t = re.sub(r"(?i)\bAED\s*([\d.,]+)\s*K\b", r"\1 ألف درهم", t)
+    t = re.sub(r"(?i)\bAED\s*([\d.,]+)", r"\1 درهم", t)
+    # Bare number + M/K (millions/thousands) with no AED in front.
+    t = re.sub(r"([\d.,]+)\s*M\b", r"\1 مليون", t)
+    t = re.sub(r"([\d.,]+)\s*K\b", r"\1 ألف", t)
+    # Any leftover currency/unit tokens.
+    t = re.sub(r"(?i)\bAED\b", "درهم", t)
+    t = re.sub(r"(?i)\bsq\.?\s*ft\b|\bsqft\b", "قدم مربع", t)
+    # Brand/developer names in Arabic so they aren't spoken in English mid-sentence.
+    t = re.sub(r"(?i)\bSobha\s+Realty\b", "صبها العقارية", t)
+    t = re.sub(r"(?i)\bSobha\b", "صبها", t)
+    # Drop leaked foreign scripts. Then, since this is Arabic-only copy, any Latin
+    # letters left are a model slip (a stray English word) — strip them so the voice
+    # never breaks into English gibberish. Digits stay (prices already made words,
+    # but plain numbers are fine for the Arabic voice to read).
+    t = _FOREIGN_SCRIPTS.sub("", t)
+    t = re.sub(r"[A-Za-z]+", "", t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
 def _harden_env():
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
     if os.environ.get("PHONEMIZER_ESPEAK_LIBRARY"):
@@ -508,6 +543,12 @@ class Voice:
                 async for sentence in sentences:
                     if clean:
                         sentence = strip_stage_directions(sentence)
+                        if not sentence:
+                            continue
+                    if lang == "ar":
+                        # Prices -> Arabic words, strip leaked foreign scripts, so
+                        # the voice never says "AED"/"M" or gibbers a stray glyph.
+                        sentence = normalize_arabic(sentence)
                         if not sentence:
                             continue
                     async for pcm in engine.synth(sentence, lang):

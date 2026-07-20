@@ -51,11 +51,17 @@ def is_arabic(text: str) -> bool:
 # (the model reads undiacritised text more naturally).
 def reply_language_clause(lang: str) -> str:
     if lang == "ar":
-        return ("Reply ONLY in clear, fluent Modern Standard Arabic (الفصحى), the "
-                "way a professional Dubai real-estate presenter speaks — warm, "
-                "natural and easy to understand. Use complete, well-punctuated "
-                "sentences so every word is pronounced clearly. Do NOT use any "
-                "English words, Latin letters, transliteration, or tashkeel.")
+        return ("Reply ONLY in clear, fluent Modern Standard Arabic the way a "
+                "professional presenter in Dubai speaks — warm, natural and easy "
+                "to understand. Use complete, well-punctuated sentences.\n"
+                "STRICT RULES for the Arabic:\n"
+                "- Write EVERYTHING in Arabic letters. Do NOT use any Latin letters, "
+                "English words, or any non-Arabic script anywhere.\n"
+                "- PRICES must be in Arabic words: say «درهم» (never 'AED'), «مليون» "
+                "(never 'M'), «ألف» (never 'K'). Example: «يبدأ من 1.83 مليون درهم».\n"
+                "- Write project names in Arabic letters (e.g. «صبها ون»، «صبها "
+                "هارتلاند»، «صبها وان»), never in English.\n"
+                "- No tashkeel/diacritics.")
     return "Reply in English."
 
 
@@ -83,6 +89,11 @@ class Brain:
         self.model = llm["model"]
         self.max_tokens = llm["max_output_tokens"]
         self.temperature = llm["temperature"]
+        # Reasoning models (gpt-oss) "think" before answering, and those thinking
+        # tokens count against the output budget — at the default effort they can eat
+        # the WHOLE budget and return an empty answer. 'low' keeps thinking minimal so
+        # the tokens go to the spoken reply. Ignored by non-reasoning models.
+        self.reasoning_effort = llm.get("reasoning_effort")
         # Grounded web search is a Gemini-only tool. Groq has no search, so the
         # setting is ignored there rather than silently pretending to work.
         self.allow_grounding = bool(llm.get("grounding")) and self.provider == "gemini"
@@ -167,6 +178,9 @@ class Brain:
     def _groq_stream(self, prompt: str, ground: bool, max_tokens: int):
         """Blocking generator of raw text chunks from Groq (OpenAI-shaped API).
         `ground` is ignored: Groq has no web-search tool."""
+        extra = {}
+        if self.reasoning_effort:
+            extra["reasoning_effort"] = self.reasoning_effort
         stream = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "system", "content": self.system},
@@ -174,6 +188,7 @@ class Brain:
             max_completion_tokens=max_tokens,
             temperature=self.temperature,
             stream=True,
+            **extra,
         )
         for chunk in stream:
             # delta.content is None on the opening/closing chunks — skip, don't crash.
@@ -231,7 +246,9 @@ class Brain:
             # a paragraph) to stay responsive — but clarity comes first.
             length_rule = ("Reply as Bello in 1-2 complete, fluent spoken sentences. "
                            + reply_language_clause("ar"))
-            max_tokens = 220
+            # Generous: a reasoning model spends some of this budget THINKING before
+            # it writes the reply, so the visible answer needs headroom on top.
+            max_tokens = 350
         else:
             length_rule = ("Reply as Bello in English, in 1-2 short, lively spoken "
                            "sentences.")

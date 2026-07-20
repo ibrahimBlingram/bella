@@ -5,16 +5,16 @@ llm:
   # gemini — Google Gemini Flash. Needs GEMINI_API_KEY *with billing enabled*: the
   #          free tier is 20 requests/DAY, which a live stream burns in minutes.
   provider: groq
-  # Llama 4 Scout: reliably CLEAN Arabic. llama-3.3-70b leaks foreign scripts
-  # (Chinese/Korean/Latin) into Arabic in the full production context (0/6 clean in
-  # testing) — Scout was 6/6. It is also fast (MoE, no hidden reasoning) and strong
-  # in English, so both languages stay fluent. This is why Arabic is now the primary.
-  model: meta-llama/llama-4-scout-17b-16e-instruct
-  # Other Groq models: llama-3.3-70b-versatile (English-only, its Arabic drifts),
-  #   openai/gpt-oss-120b (clean Arabic too, but a slower reasoning model).
-  #   For gemini: gemini-2.5-flash.
+  # gpt-oss-120b gives the CLEANEST Arabic of the available Groq models and speaks
+  # prices in Arabic words. It is a REASONING model, so reasoning_effort=low is
+  # required — otherwise thinking eats the whole token budget and the reply comes
+  # back empty. (llama-3.3-70b leaks foreign scripts into Arabic; llama-4-scout was
+  # retired by Groq; qwen3.6 burns the budget on hidden thinking.)
+  model: openai/gpt-oss-120b
+  reasoning_effort: low          # gpt-oss only — keep thinking short so tokens -> reply
+  # Other Groq models: llama-3.3-70b-versatile, openai/gpt-oss-20b. gemini-2.5-flash.
   grounding: false               # Gemini ONLY (web search). Ignored on groq.
-  max_output_tokens: 120         # short, spoken answers
+  max_output_tokens: 250         # room for a reasoning model's think + spoken answer
   temperature: 0.9               # variety -> never-repeating narration
 
 tts:
@@ -58,23 +58,25 @@ tts:
   # ffmpeg instead. 1.0 = original; BELOW 1.0 = SLOWER. 0.9 slows him ~10% so he
   # stops sounding rushed WITHOUT dropping his pitch. Applies to English.
   speed: 0.9
-  # Arabic is the PRIMARY language and must be crystal-clear ("tajweed"-clean), so
-  # it plays a touch slower than English — slowing the multilingual Arabic voice
-  # sharpens each word without dropping pitch. Lower = clearer/slower. Falls back
-  # to `speed` if unset.
-  speed_ar: 0.86
+  # Arabic playback speed. The Edge UAE voice is already clear and natural at its
+  # own pace, so we do NOT time-stretch it (stretching a clean neural voice only
+  # adds robotic artifacts — the very thing we're fixing). 1.0 = no stretch.
+  speed_ar: 1.0
   # --- used only when provider: kokoro ---
   voice_id: "am_puck"            # kokoro MALE voice (Bello). others: am_onyx, am_fenrir, bm_george ...
   kokoro_lang: "a"               # 'a' US English, 'b' UK English
   model_id: "sonic-3"            # unused by kokoro; only for cartesia/elevenlabs
-  arabic:                        # Arabic reply voice — used when the primary is English-only
+  arabic:                        # Arabic voice (the PRIMARY language now)
     enabled: true                # set false for an English-only stream
-    # chatterbox_multi = the SAME cloned voice as English (needs CUDA + an Arabic
-    #   ref clip). This is what keeps both languages sounding like one person.
-    # edge = free Microsoft neural voice (different voice) | elevenlabs = paid
-    # Falls back to edge automatically if chatterbox_multi can't load.
-    engine: chatterbox_multi
-    voice_id: "ar-SA-HamedNeural"        # edge-tts MALE Saudi voice (matches am_puck)
+    # CLARITY over voice-matching: Arabic is primary and must be understandable, so
+    # it uses Edge's UAE neural voice — clear, natural, and genuinely Emirati (how
+    # Dubai people sound). chatterbox_multi cloned Bello's voice but its Arabic was
+    # robotic and hard to follow, which defeats the point of an Arabic-first host.
+    #   chatterbox_multi = same cloned voice as English, but muddy Arabic (CUDA)
+    #   edge = free Microsoft neural voice — clear + natural (needs internet)
+    #   elevenlabs = paid, also natural
+    engine: edge
+    voice_id: "ar-AE-HamdanNeural"       # edge-tts MALE Emirati/UAE voice (Dubai Arabic)
     # other edge voices: ar-SA-ZariyahNeural (F), ar-EG-ShakirNeural (M, Egyptian),
     #                    ar-EG-SalmaNeural (F, Egyptian), ar-AE-HamdanNeural (M, UAE)
     # optional paid fallback (set engine: elevenlabs):
