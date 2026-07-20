@@ -36,12 +36,29 @@ _NEEDS_WEB = re.compile(
 _RETRYABLE = {429, 500, 502, 503, 504}
 _MAX_ATTEMPTS = 3
 
-# Arabic detection: any Arabic-script character in the comment.
+# Reply-language detection by SCRIPT. Arabic is the channel's primary language, but
+# a viewer comment is answered in ITS OWN language so a Chinese or Russian viewer
+# hears their own tongue back \u2014 that's what the on-screen language ticker promises.
 _ARABIC = re.compile(r"[\u0600-\u06FF]")
+_CHINESE = re.compile(r"[\u4E00-\u9FFF]")        # CJK unified ideographs
+_CYRILLIC = re.compile(r"[\u0400-\u04FF]")        # Russian (and other Cyrillic)
 
 
 def is_arabic(text: str) -> bool:
     return bool(_ARABIC.search(text or ""))
+
+
+def detect_lang(text: str) -> str:
+    """Which language to answer a comment in, from the script it was written in.
+    Order matters only in that each script is exclusive. Defaults to English."""
+    t = text or ""
+    if _ARABIC.search(t):
+        return "ar"
+    if _CHINESE.search(t):
+        return "zh"
+    if _CYRILLIC.search(t):
+        return "ru"
+    return "en"
 
 
 # One place that says HOW to write each language. Arabic is the channel's primary
@@ -62,6 +79,25 @@ def reply_language_clause(lang: str) -> str:
                 "- Write project names in Arabic letters (e.g. «صبها ون»، «صبها "
                 "هارتلاند»، «صبها وان»), never in English.\n"
                 "- No tashkeel/diacritics.")
+    if lang == "zh":
+        return ("Reply ONLY in natural, fluent Simplified Chinese (Mandarin) the way "
+                "a warm, professional presenter speaks — clear and easy to follow. "
+                "Use complete, well-punctuated sentences.\n"
+                "STRICT RULES for the Chinese:\n"
+                "- Write EVERYTHING in Chinese characters. Do NOT use any Latin "
+                "letters, English words, or pinyin anywhere.\n"
+                "- PRICES in Chinese: say «迪拉姆» (never 'AED'), «百万» for million, "
+                "«千» for thousand. Example: «起价约183万迪拉姆».\n"
+                "- Keep it to the point — this is spoken aloud on a live stream.")
+    if lang == "ru":
+        return ("Reply ONLY in natural, fluent Russian the way a warm, professional "
+                "presenter speaks — clear and easy to follow. Use complete, "
+                "well-punctuated sentences.\n"
+                "STRICT RULES for the Russian:\n"
+                "- Write EVERYTHING in Cyrillic. Do NOT use any Latin letters or "
+                "English words anywhere.\n"
+                "- PRICES in Russian words: say «дирхам» (never 'AED'), «миллион» "
+                "(never 'M'). Example: «от 1,83 миллиона дирхамов».")
     return "Reply in English."
 
 
@@ -238,14 +274,15 @@ class Brain:
         question is a LEAD — so the answer has to be specific and, above all,
         accurate. A wrong price is worse than no price."""
         ground = self.allow_grounding and bool(_NEEDS_WEB.search(question))
-        if lang == "ar":
-            # Arabic is the PRIMARY language now, so it gets a full, clear answer —
-            # not the old one-line cap. 1-2 complete, fluent MSA sentences: enough to
-            # actually answer the question and sound like a real Dubai presenter. The
-            # Arabic voice is slower to synthesize, so we keep it to 1-2 sentences (not
-            # a paragraph) to stay responsive — but clarity comes first.
+        if lang != "en":
+            # A non-English viewer (Arabic, Chinese, Russian) is answered in their own
+            # language — clear and complete, 1-2 fluent spoken sentences: enough to
+            # actually answer and sound like a real presenter. Kept to 1-2 sentences
+            # (not a paragraph) so the reply stays responsive on a live stream, but
+            # clarity comes first. reply_language_clause carries the per-language
+            # rules (script, prices in words, no Latin letters).
             length_rule = ("Reply as Bello in 1-2 complete, fluent spoken sentences. "
-                           + reply_language_clause("ar"))
+                           + reply_language_clause(lang))
             # Generous: a reasoning model spends some of this budget THINKING before
             # it writes the reply, so the visible answer needs headroom on top.
             max_tokens = 350

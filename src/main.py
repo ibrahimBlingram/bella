@@ -23,7 +23,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from brain import Brain, is_arabic
+from brain import Brain, detect_lang
 from featured import Featured
 from listener import Listener
 from obs_control import OBS
@@ -213,6 +213,9 @@ async def main():
         obs.apply_reel_layout(drop_px=int(o.get("avatar_drop_px", 0)),
                               shift_x=int(o.get("avatar_shift_x", 0)))
 
+    # Scrolling bottom ticker advertising every language Bello can speak.
+    obs.ensure_language_ticker(o.get("language_ticker"))
+
     # Looping background music with auto-ducking (swells when he's silent, drops
     # when he speaks). Purely an OBS overlay — does not touch his voice pipeline.
     obs.ensure_music(o.get("music"))
@@ -338,7 +341,12 @@ async def main():
                 slideshow.pause()
                 try:
                     print(f"[comment] {name}: {text!r} -> answering")
-                    lang = "ar" if (is_arabic(text) and voice.has_arabic) else "en"
+                    # Answer in the language the viewer wrote in (ar/zh/ru/en). If
+                    # Bello has no voice for it, fall back to English rather than
+                    # trying to speak a language with no engine.
+                    lang = detect_lang(text)
+                    if not voice.has_lang(lang):
+                        lang = "en"
                     # If it's about a specific project, put THAT one on screen (still
                     # frozen — start() shows the first image, pause() holds it).
                     asked = featured.match(text)

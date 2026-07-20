@@ -321,3 +321,64 @@ class OBS:
             setup_music(self.c, self.scene, music_cfg)
         except Exception as e:
             print(f"[obs] background music setup skipped: {e}")
+
+    def ensure_language_ticker(self, cfg: dict):
+        """Create (if missing) a scrolling ticker along the bottom that advertises
+        every language Bello can speak. Idempotent + guarded, so a fresh box gets it
+        automatically and a missing OBS feature never crashes the stream. cfg is the
+        obs.language_ticker block; None or enabled:false -> off."""
+        if not cfg or not cfg.get("enabled", True):
+            return
+        self._submit(self._do_ensure_language_ticker, cfg)
+
+    def _do_ensure_language_ticker(self, cfg: dict):
+        # A text source + a Scroll filter is OBS's native marquee: the filter loops
+        # the text so it never runs out, giving a continuous ticker. FreeType2 only
+        # renders glyphs the chosen `font` actually has — the default text is Latin
+        # so it always shows; native scripts need a Unicode font (see config.yaml).
+        name = cfg.get("source_name", "LanguageTicker")
+        self.ticker_src = name
+        text = cfg.get("text") or ("Bello speaks your language:    English    •    "
+                                   "Arabic    •    Chinese    •    Russian          ")
+        try:
+            W, H = self._canvas()
+            font = {"face": cfg.get("font", "Arial"),
+                    "size": int(cfg.get("font_size", max(24, int(H * 0.02)))),
+                    "style": cfg.get("font_style", "Bold")}
+            color = int(cfg.get("color", 0xFFFFFFFF))
+            settings = {"text": text, "font": font,
+                        "color1": color, "color2": color, "outline": True}
+            existing = {i["inputName"] for i in self.c.get_input_list().inputs}
+            if name not in existing:
+                self.c.create_input(self.scene, name, "text_ft2_source_v2",
+                                    settings, True)
+            else:
+                self.c.set_input_settings(name, settings, overlay=True)
+            # The Scroll filter is the movement. loop repeats the text so the band is
+            # never empty; speed_x is px/sec (sign = direction).
+            fsettings = {"speed_x": float(cfg.get("speed_x", 100.0)),
+                         "speed_y": 0.0, "loop": True}
+            try:
+                have = {f["filterName"]
+                        for f in self.c.get_source_filter_list(name).filters}
+            except Exception:
+                have = set()
+            if "Scroll" in have:
+                self.c.set_source_filter_settings(name, "Scroll", fsettings)
+            else:
+                self.c.create_source_filter(name, "Scroll", "scroll_filter", fsettings)
+            # Bottom band, anchored top-left at (0, y_frac*H) so it spans the width.
+            iid = self._item_id(name)
+            self.c.set_scene_item_transform(self.scene, iid, {
+                "positionX": 0, "positionY": int(H * float(cfg.get("y_frac", 0.94))),
+                "alignment": 5})
+            self._set_visible(name, True)
+            # Keep the ticker on TOP of everything else on screen.
+            try:
+                n = len(self.c.get_scene_item_list(self.scene).scene_items)
+                self.c.set_scene_item_index(self.scene, iid, max(0, n - 1))
+            except Exception:
+                pass
+            print(f"[obs] language ticker '{name}' ready.")
+        except Exception as e:
+            print(f"[obs] language ticker skipped: {e}")

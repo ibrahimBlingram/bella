@@ -150,6 +150,21 @@ def normalize_arabic(text: str) -> str:
     return re.sub(r"\s{2,}", " ", t).strip()
 
 
+# Which tts.* config block configures each EXTRA (non-English) language, and the
+# language code the rest of the app routes by. English is served by the primary
+# engine (tts.provider); every other language gets its own engine (Edge by default).
+# Add a language by adding a block here and a matching block in config.yaml.
+_LANG_BLOCKS = {"arabic": "ar", "chinese": "zh", "russian": "ru"}
+
+
+def normalize_for(text: str, lang: str) -> str:
+    """Per-language cleanup applied right before TTS. Arabic needs prices turned
+    into words and leaked foreign scripts stripped (normalize_arabic); the Edge
+    neural voices for Chinese and Russian read their own native script cleanly, so
+    those pass through untouched."""
+    return normalize_arabic(text) if lang == "ar" else text
+
+
 def _harden_env():
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
     if os.environ.get("PHONEMIZER_ESPEAK_LIBRARY"):
@@ -467,46 +482,29 @@ class Voice:
         else:
             self.english = KokoroTTS(cfg)              # local, English only
 
-        # Separate Arabic engine — only when the primary can't speak Arabic.
+        # Separate engine PER extra (non-English) language — only when the primary
+        # can't speak them. Arabic, Chinese, and Russian each get their own voice,
+        # chosen in config (tts.arabic / tts.chinese / tts.russian). Edge's clear
+        # neural voices are the default: the same clarity-over-cloning call that put
+        # Arabic on Edge applies to tonal Chinese and to Russian too. English keeps
+        # Chatterbox Turbo (cloned voice + REAL performed laughter). A multilingual
+        # primary (chatterbox_multi) already covers every language, so no extras then.
         #
-        # The best combo is chatterbox (Turbo) for English + chatterbox_multi for
-        # Arabic: English gets REAL performed laughter ([laugh]/[sigh]/[chuckle],
-        # which only Turbo can do) while Arabic still gets the same cloned voice
-        # from the multilingual model. Two models on the GPU instead of one; that
-        # is the price of laughter in English and a clone in Arabic.
-        #
-        # say() picks the engine per language and decides tag-stripping per
-        # engine, so a tag can never leak into the Arabic model, which would
-        # speak it as a literal word.
-        self.arabic = None
+        # say() picks the engine per language and decides tag-stripping per engine,
+        # so a paralinguistic tag can never leak into a non-English model, which
+        # would speak it as a literal word.
+        self.extra = {}
         if not self.multilingual:
-            ar = cfg["tts"].get("arabic") or {}
-            if ar.get("enabled"):
-                engine = (ar.get("engine") or "edge").lower()
-                try:
-                    if engine in ("chatterbox_multi", "chatterbox"):
-                        if not _has_cuda():
-                            raise RuntimeError("chatterbox Arabic needs CUDA")
-                        self.arabic = ChatterboxMultiTTS(cfg)   # cloned Arabic voice
-                    elif engine == "elevenlabs":         # paid, optional
-                        self.arabic = ElevenLabsTTS(
-                            voice_id=ar.get("elevenlabs_voice_id") or ar["voice_id"],
-                            model_id=ar.get("model_id", "eleven_flash_v2_5"),
-                            sample_rate=self.sr,
-                        )
-                    else:                                  # edge-tts: free, no key
-                        self.arabic = EdgeTTS(ar.get("voice_id"), self.sr,
-                                              label="Arabic")
-                    print(f"[voice] Arabic enabled via {engine}")
-                except Exception as e:
-                    print(f"[voice] Arabic via {engine} failed ({e}); "
-                          f"falling back to edge-tts.")
-                    try:
-                        self.arabic = EdgeTTS(ar.get("voice_id"), self.sr,
-                                              label="Arabic")
-                    except Exception as e2:
-                        print(f"[voice] Arabic disabled ({e2}); English only.")
-        self.has_arabic = self.multilingual or self.arabic is not None
+            for block, code in _LANG_BLOCKS.items():
+                spec = cfg["tts"].get(block) or {}
+                if not spec.get("enabled"):
+                    continue
+                engine = self._build_lang_engine(cfg, spec, block)
+                if engine is not None:
+                    self.extra[code] = engine
+        # Back-compat: main.py + tests still reference has_arabic / arabic.
+        self.arabic = self.extra.get("ar")
+        self.has_arabic = self.multilingual or ("ar" in self.extra)
         # True only when the ENGLISH engine can perform [laugh]/[sigh] as sounds.
         # The brain is told to write them only when this is on.
         self.performs_tags = bool(getattr(self.english, "performs_tags", False))
@@ -515,15 +513,51 @@ class Voice:
         # re-initialise PortAudio so it stops handing out a dead device.
         self._audio_broken = False
 
+    def _build_lang_engine(self, cfg, spec, label):
+        """Build the TTS engine for one non-English language from its config block
+        (tts.arabic / tts.chinese / tts.russian). Falls back to edge-tts on ANY
+        failure — a clear neural voice beats a dead language on a live stream."""
+        engine = (spec.get("engine") or "edge").lower()
+        try:
+            if engine in ("chatterbox_multi", "chatterbox"):
+                if not _has_cuda():
+                    raise RuntimeError(f"chatterbox {label} needs CUDA")
+                eng = ChatterboxMultiTTS(cfg)            # cloned voice (CUDA)
+            elif engine == "elevenlabs":                 # paid, optional
+                eng = ElevenLabsTTS(
+                    voice_id=spec.get("elevenlabs_voice_id") or spec["voice_id"],
+                    model_id=spec.get("model_id", "eleven_flash_v2_5"),
+                    sample_rate=self.sr,
+                )
+            else:                                        # edge-tts: free, no key
+                eng = EdgeTTS(spec.get("voice_id"), self.sr, label=label)
+            print(f"[voice] {label} enabled via {engine}")
+            return eng
+        except Exception as e:
+            print(f"[voice] {label} via {engine} failed ({e}); falling back to edge-tts.")
+            try:
+                return EdgeTTS(spec.get("voice_id"), self.sr, label=label)
+            except Exception as e2:
+                print(f"[voice] {label} disabled ({e2}).")
+                return None
+
+    def has_lang(self, lang) -> bool:
+        """Can Bello speak this language? English always; a multilingual primary
+        covers everything; otherwise only the extra languages we built an engine for."""
+        return self.multilingual or lang == "en" or lang in self.extra
+
     def _engine(self, lang):
         if self.multilingual:                # one model handles every language
             return self.english
-        return self.arabic if (lang == "ar" and self.arabic) else self.english
+        return self.extra.get(lang, self.english)
 
     async def say(self, sentences, lang="en", on_start=None, on_stop=None):
         engine = self._engine(lang)
-        # Arabic plays a touch slower (clarity); English keeps its own pace.
-        speed = self.speed_ar if lang == "ar" else self.speed
+        # English keeps its own (chatterbox) pace; Arabic has its own knob (clarity).
+        # The other Edge neural voices (zh, ru) are already clear, so they play at
+        # 1.0 — time-stretching a clean neural voice only adds robotic artifacts.
+        speed = (self.speed if lang == "en"
+                 else self.speed_ar if lang == "ar" else 1.0)
 
         # Synthesize AHEAD of playback. Non-streaming engines (edge, chatterbox)
         # emit one blob per sentence, so a serial synth->play->synth loop leaves
@@ -545,10 +579,11 @@ class Voice:
                         sentence = strip_stage_directions(sentence)
                         if not sentence:
                             continue
-                    if lang == "ar":
-                        # Prices -> Arabic words, strip leaked foreign scripts, so
-                        # the voice never says "AED"/"M" or gibbers a stray glyph.
-                        sentence = normalize_arabic(sentence)
+                    if lang != "en":
+                        # Per-language cleanup: Arabic -> prices in words + strip
+                        # leaked foreign scripts (so the voice never says "AED"/"M"
+                        # or gibbers a stray glyph); zh/ru pass through unchanged.
+                        sentence = normalize_for(sentence, lang)
                         if not sentence:
                             continue
                     async for pcm in engine.synth(sentence, lang):

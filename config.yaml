@@ -82,6 +82,24 @@ tts:
     # optional paid fallback (set engine: elevenlabs):
     elevenlabs_voice_id: "21m00Tcm4TlvDq8ikWAM"
     model_id: "eleven_flash_v2_5"
+  chinese:                       # Mandarin — spoken when a viewer comments in Chinese
+    enabled: true
+    # CLARITY over voice-matching, same call as Arabic: Edge's neural Mandarin voice
+    # is clear and natural; chatterbox_multi mispronounces the TONES and sounds muddy
+    # — worse for Chinese than it already was for Arabic.
+    #   edge = free Microsoft neural voice (recommended) | chatterbox_multi (CUDA) | elevenlabs (paid)
+    engine: edge
+    voice_id: "zh-CN-YunxiNeural"        # edge-tts MALE Mandarin voice (warm, lively)
+    # other edge voices: zh-CN-YunjianNeural (M, sporty), zh-CN-XiaoxiaoNeural (F)
+    elevenlabs_voice_id: "21m00Tcm4TlvDq8ikWAM"
+    model_id: "eleven_flash_v2_5"
+  russian:                       # Russian — spoken when a viewer comments in Russian
+    enabled: true
+    engine: edge                 # Edge neural Russian is clear + natural, free, no GPU
+    voice_id: "ru-RU-DmitryNeural"       # edge-tts MALE Russian voice
+    # other edge voices: ru-RU-SvetlanaNeural (F)
+    elevenlabs_voice_id: "21m00Tcm4TlvDq8ikWAM"
+    model_id: "eleven_flash_v2_5"
 
 stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
@@ -143,6 +161,24 @@ obs:
   # on a phone. Raise until the watermark is gone; too high starts cutting his hands.
   avatar_drop_px: 150
   avatar_shift_x: 45             # nudge the avatar RIGHT (px). ~45 ~= 0.5cm on a phone.
+  # Scrolling ticker along the BOTTOM that shows every language Bello can speak, so
+  # viewers see at a glance he'll answer in theirs. It's an OBS text source with a
+  # Scroll filter (the marquee). The DEFAULT text is Latin-only so it renders with
+  # any font. To show the native scripts (العربية / 中文 / Русский), set `font` to a
+  # Unicode font that covers them — "Noto Sans" for Cyrillic, "Noto Sans CJK SC" for
+  # Chinese, "Noto Sans Arabic" for Arabic — and swap in the commented `text` below.
+  # Set enabled: false to turn it off.
+  language_ticker:
+    enabled: true
+    text: "Bello speaks your language:    English    •    Arabic    •    Chinese    •    Russian          "
+    # native-script version (needs a Unicode font in `font`):
+    # text: "Bello speaks your language:    English  •  العربية  •  中文  •  Русский          "
+    font: "Arial"
+    font_size: 26
+    font_style: "Bold"
+    speed_x: 100                 # marquee speed (px/s). Flip the sign to reverse direction.
+    y_frac: 0.94                 # top edge of the ticker as a fraction of canvas height
+    color: 0xFFFFFFFF            # ARGB, white
   title_source: "BellaTitle"
   avatar_idle_source: "AvatarIdle"
   avatar_talk_source: "AvatarTalk"
