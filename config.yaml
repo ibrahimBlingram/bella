@@ -103,7 +103,7 @@ tts:
 
 stream:
   username_env: TIKTOK_USERNAME  # read handle from .env
-  language: ar                   # PRIMARY language (narration + greetings). en | ar | de | es | pt | fr
+  language: en                   # PRIMARY language (narration + greetings). en | ar | de | es | pt | fr
                                  # Comments are still answered in the language they
                                  # were written in (Arabic->Arabic, English->English).
   theme: dubai_realestate        # loads knowledge/theme_<theme>.md  -> swap monthly

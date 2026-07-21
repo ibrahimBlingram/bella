@@ -157,11 +157,10 @@ class Brain:
             persona["system_prompt"]
             + (f"\n\n{laughter.strip()}" if laughter else "")
             + "\n\nLANGUAGE: Reply in the language the current prompt tells you to "
-              "use. ARABIC is this channel's PRIMARY language — when you write "
+              "use, and never mix two languages in one reply. When you write "
               "Arabic, use clear, fluent Modern Standard Arabic (الفصحى) as a "
               "professional Dubai presenter speaks: warm, natural, easy to follow, "
-              "no English words or Latin letters, no tashkeel. Never mix two "
-              "languages in one reply."
+              "no English words or Latin letters, no tashkeel."
             + "\n\nDELIVERY: You are spoken aloud by an energetic TTS voice. Write "
               "like an excited, upbeat host — use natural exclamation marks and "
               "lively phrasing so you sound enthusiastic and warm. Don't put an "
