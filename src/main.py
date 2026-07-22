@@ -284,7 +284,12 @@ async def main():
     # the first slideshow.start() will set the real one.
     obs.hide_title()
 
-    async def speak(sentences, lang="en"):
+    # The currently-playing speech, tracked so a viewer comment can CUT IN on
+    # narration/greetings instead of waiting out the whole segment. Only the
+    # filler talk is interruptible; a comment answer itself is never cut off.
+    current_speech = {"task": None, "interruptible": False}
+
+    async def _do_speak(sentences, lang):
         async with speak_lock:
             await voice.say(
                 sentences, lang=lang,
@@ -293,6 +298,29 @@ async def main():
             )
         # Stamped AFTER he finishes, so the idle gap is measured from silence.
         state["last_spoke"] = time.time()
+
+    async def speak(sentences, lang="en", interruptible=False):
+        # Speak on a child task so interrupt_speech() can cancel it mid-sentence.
+        task = asyncio.create_task(_do_speak(sentences, lang))
+        current_speech["task"] = task
+        current_speech["interruptible"] = interruptible
+        try:
+            await task
+        except asyncio.CancelledError:
+            # A comment cut in: voice.say already stopped the audio and cleared
+            # the talk state in its cleanup. Swallow it so the caller moves on.
+            pass
+        finally:
+            if current_speech["task"] is task:
+                current_speech["task"] = None
+
+    def interrupt_speech():
+        """Stop whatever filler Bello is speaking RIGHT NOW so a comment can be
+        answered instantly. No-op unless the current speech is interruptible
+        narration/greeting — a comment answer is never cut off by another comment."""
+        t = current_speech["task"]
+        if t is not None and current_speech["interruptible"] and not t.done():
+            t.cancel()
 
     async def handle_events():
         while True:
@@ -334,10 +362,11 @@ async def main():
                 if jitter[1] > 0:
                     await asyncio.sleep(random.uniform(*jitter))
                 state["last_qa"] = time.time()
-                # Claim the floor: the idle tour must not start a new project while
-                # we answer, and the background FREEZES so it can't run on to the
-                # next building mid-reply.
+                # Claim the floor and CUT IN immediately: stop whatever segment
+                # Bello is narrating this instant (don't wait it out) and FREEZE
+                # the background so it can't run on to the next building mid-reply.
                 state["answering"] = True
+                interrupt_speech()
                 slideshow.pause()
                 try:
                     print(f"[comment] {name}: {text!r} -> answering")
@@ -381,7 +410,7 @@ async def main():
                 line = f"أهلاً وسهلاً {'، '.join(batch[:-1])} و{batch[-1]}!"
             else:
                 line = f"welcome in {', '.join(batch[:-1])} and {batch[-1]}!"
-            await speak(_one(line), lang=primary_lang)
+            await speak(_one(line), lang=primary_lang, interruptible=True)
 
     # ---- segment prefetch -------------------------------------------------
     # Ask the brain for the NEXT segment while Bello is still speaking the current
@@ -461,11 +490,13 @@ async def main():
                 if kind == "project":
                     # Background AND title set together — they cannot desync.
                     await slideshow.start(payload, payload.name, _price_of(payload))
-                    await speak(_from_list(sentences), lang=primary_lang)
+                    await speak(_from_list(sentences), lang=primary_lang,
+                                interruptible=True)
                     topics.mark(payload.name)
                 else:
                     obs.hide_title()            # Dubai hook, not a project
-                    await speak(_from_list(sentences), lang=primary_lang)
+                    await speak(_from_list(sentences), lang=primary_lang,
+                                interruptible=True)
                     topics.mark(payload)
                 continue
 
@@ -476,7 +507,7 @@ async def main():
             if quiet >= idle_after:
                 topic = topics.next()
                 await speak(brain.narrate(topic, topics.covered, lang=primary_lang),
-                            lang=primary_lang)
+                            lang=primary_lang, interruptible=True)
                 topics.mark(topic)
 
     async def watchdog():
